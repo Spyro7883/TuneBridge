@@ -1,0 +1,6 @@
+---
+date: "2026-05-05 00:00"
+promoted: false
+---
+
+Aceasta e ideea pentru proiect: eu ascult o piesa pe spotify si o adaug in playlistul meu, dupa i au link ul de la piesa si vreau ca agentul ai (sau agentii) sa caute piesa exacta pe yt ( audio, nu neaparat video deoarece unele video uri de piese au poate alte sunete, care difera de varianta audio), apoi ia link ul de yt si se foloseste de aplicatia retune sa downloadeze piesa. As vrea ca user ul sa aiba optiunea intre varianta originala 440hz sau 432hz in care vreau sa salvez melodiile. Agentul va salva melodiile in foldere deja existente ( de exemplu folder BoqueronPlaylist, apoi folder 432hz, apoi artist_432HZ apoi fie intr un folder de album, fie single uri/sencillos). De exemplu daca sunt piese dintr un album ma bazez ca agentul ai sa stie automat unde sa salveze piesele, dar pt single uri ma poate intreba. Dupa ce piesele sunt salvate vreau sa te conectezi la iBroadcast si sa incarci piesele noi intrun playlist (ex Boquerón Playlist). Ideea e ca tu alegi numele la playlist, alegi folder cu piese si tu va trebui sa stii ce piese sa lasi sa fie incarcate. Inca un lucru, scriptul de retune folosea thread uri pt a downloada mai multe piese, asa ca decide tu nr de thread uri care treb folosite bazat pe nr de piese downloadate pe moment
