@@ -8,6 +8,18 @@ TuneBridge is a desktop GUI application (tkinter) that takes Spotify track links
 
 Given a batch of Spotify links, TuneBridge delivers the downloaded (and optionally retuned) audio files into the right folders and uploads them to iBroadcast without manual intervention at each step.
 
+## Current Milestone: v1.0 Full Pipeline
+
+**Goal:** Deliver the complete TuneBridge application — end-to-end pipeline from link input to iBroadcast upload.
+
+**Target features:**
+- Dual input: Spotify URL (metadata → YouTube search → download) and YouTube URL (direct download)
+- Batch processing with dynamic thread count
+- Optional 440Hz → 432Hz retune per batch
+- Per-song folder confirmation with last-used folder suggestion
+- iBroadcast upload with duplicate check
+- tkinter GUI consistent with retune_app.py
+
 ## Requirements
 
 ### Validated
@@ -18,14 +30,16 @@ Given a batch of Spotify links, TuneBridge delivers the downloaded (and optional
 
 ### Active
 
-- [ ] Accept batch Spotify track links (paste multiple at once)
-- [ ] Extract track metadata (artist, album, title, release type) via Spotify Web API
-- [ ] Search YouTube for audio match using yt-dlp search
+- [ ] Accept batch Spotify AND/OR YouTube track links (paste multiple at once; each link can be either type)
+- [ ] For Spotify links: extract track metadata (artist, album, title, release type) via Spotify Web API
+- [ ] For YouTube links: extract title and channel name via yt-dlp info extraction (no Spotify lookup needed)
+- [ ] For Spotify links: search YouTube for audio match using yt-dlp ytsearch
+- [ ] For YouTube links: download directly from the provided URL
 - [ ] Download audio-only (no video) via yt-dlp
 - [ ] User chooses 440Hz (original) or 432Hz per batch before processing
 - [ ] Retune downloaded audio to 432Hz when selected
-- [ ] Propose folder destination based on metadata (artist/album/single classification)
-- [ ] User confirms or adjusts folder before saving
+- [ ] Propose folder destination per-song based on metadata (artist/album/single classification)
+- [ ] User confirms or adjusts folder per-song before saving (each song in batch gets its own folder dialog; last-used folder suggested as default)
 - [ ] Save to existing folder structure (e.g. BoqueronPlaylist/432hz/Artist_432Hz/Album|Singles)
 - [ ] Upload processed files to iBroadcast via official API
 - [ ] Dynamic thread count based on number of songs in current batch
@@ -37,7 +51,7 @@ Given a batch of Spotify links, TuneBridge delivers the downloaded (and optional
 - Automatic background polling — user triggers sync manually via UI
 - Creating new folder structure — folders already exist on disk, app only saves into them
 - Streaming / playback within the app — download and organize only
-- Support for sources other than Spotify links — YouTube links, Apple Music, etc. deferred
+- Support for sources other than Spotify and YouTube links — Apple Music, SoundCloud, etc. deferred
 
 ## Context
 
