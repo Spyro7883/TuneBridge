@@ -28,8 +28,12 @@
   2. Batch table renders one row per song with a status column that cycles through: Queued → Fetching metadata → Downloading → Retuning → Awaiting folder → Saving → Uploading → Done / Failed
   3. Parallel processing uses `min(batch_size, 4)` threads — verified by running 5+ songs and observing max 4 concurrent workers
   4. `[Spotify]` and `[YouTube]` type badge columns exist as placeholders in the table (not yet populated)
-**Plans**: TBD
+**Plans**: 2 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 01-01-PLAN.md — Test scaffold: pytest config + 7 test cases for SongStatus, BatchTable API, dark theme colors
+- [ ] 01-02-PLAN.md — Core implementation: tunebridge.py with TuneBridgeApp, BatchTable, SongStatus, mock pipeline
 
 ### Phase 2: Input & Detection
 **Goal**: Users can paste a mixed batch of Spotify and YouTube URLs and see each row classified or flagged before any processing begins
@@ -91,7 +95,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/? | Not started | - |
+| 1. Foundation | 0/2 | Planned | - |
 | 2. Input & Detection | 0/? | Not started | - |
 | 3. Metadata Services | 0/? | Not started | - |
 | 4. Download Pipeline | 0/? | Not started | - |
@@ -100,4 +104,4 @@
 
 ---
 
-*Last updated: 2026-05-06*
+*Last updated: 2026-05-08*
