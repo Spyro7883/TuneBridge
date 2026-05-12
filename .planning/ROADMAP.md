@@ -8,7 +8,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Foundation** — Dark GUI shell, batch table scaffold, threaded pipeline infrastructure, status state machine
+- [x] **Phase 1: Foundation** — Dark GUI shell, batch table scaffold, threaded pipeline infrastructure, status state machine
 - [ ] **Phase 2: Input & Detection** — Paste area, URL type classification, type badges, inline per-row error display
 - [ ] **Phase 3: Metadata Services** — Spotify Web API client, yt-dlp info extraction, "(guessed)" label convention
 - [ ] **Phase 4: Download Pipeline** — Dual-path download (ytsearch vs direct), 432Hz retune toggle, audio-only MP3 output
@@ -32,8 +32,8 @@
 **UI hint**: yes
 
 Plans:
-- [ ] 01-01-PLAN.md — Test scaffold: pytest config + 7 test cases for SongStatus, BatchTable API, dark theme colors
-- [ ] 01-02-PLAN.md — Core implementation: tunebridge.py with TuneBridgeApp, BatchTable, SongStatus, mock pipeline
+- [x] 01-01-PLAN.md — Test scaffold: pytest config + 7 test cases for SongStatus, BatchTable API, dark theme colors
+- [x] 01-02-PLAN.md — Core implementation: tunebridge.py with TuneBridgeApp, BatchTable, SongStatus, mock pipeline
 
 ### Phase 2: Input & Detection
 **Goal**: Users can paste a mixed batch of Spotify and YouTube URLs and see each row classified or flagged before any processing begins
@@ -95,7 +95,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/2 | Planned | - |
+| 1. Foundation | 2/2 | Complete | 2026-05-12 |
 | 2. Input & Detection | 0/? | Not started | - |
 | 3. Metadata Services | 0/? | Not started | - |
 | 4. Download Pipeline | 0/? | Not started | - |
@@ -104,4 +104,4 @@ Plans:
 
 ---
 
-*Last updated: 2026-05-08*
+*Last updated: 2026-05-12*

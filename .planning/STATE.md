@@ -3,18 +3,18 @@ milestone: v1.0
 name: Full Pipeline
 status: planning
 progress:
-  phases_complete: 0
+  phases_complete: 1
   phases_total: 6
-  plans_complete: 0
-  plans_total: 0
+  plans_complete: 2
+  plans_total: 2
 ---
 
 ## Current Position
 
-Phase: Phase 1 — Foundation (not started)
+Phase: Phase 2 — Input & Detection (not started)
 Plan: —
-Status: Roadmap defined; ready for phase planning
-Last activity: 2026-05-06 — Roadmap v1.0 created (6 phases, 19/19 requirements mapped)
+Status: Phase 1 complete; ready for Phase 2 planning
+Last activity: 2026-05-12 — Phase 1 Foundation complete (7 tests GREEN, CR fixes applied)
 
 ## Decisions
 
