@@ -43,7 +43,11 @@ Plans:
   1. User pastes multiple URLs (mixed Spotify and YouTube) into a single input area and each URL becomes a separate row
   2. Each row shows a `[Spotify]` or `[YouTube]` badge immediately after paste, before any download or metadata fetch
   3. An unrecognized or malformed URL shows a red inline error on that row only — other valid rows are unaffected and remain processable
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Test scaffold: 11 failing tests for classify_url() and paste→row integration (RED state)
+- [ ] 02-02-PLAN.md — Core implementation: classify_url(), BatchTable tag-collision fix, paste widget, _process_urls()
 
 ### Phase 3: Metadata Services
 **Goal**: App can resolve full metadata for any URL in the batch — confirmed fields from Spotify API or extracted fields (labeled as guessed) from YouTube
@@ -96,7 +100,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete | 2026-05-12 |
-| 2. Input & Detection | 0/? | Not started | - |
+| 2. Input & Detection | 0/2 | Not started | - |
 | 3. Metadata Services | 0/? | Not started | - |
 | 4. Download Pipeline | 0/? | Not started | - |
 | 5. Organization | 0/? | Not started | - |
@@ -104,4 +108,4 @@ Plans:
 
 ---
 
-*Last updated: 2026-05-12*
+*Last updated: 2026-05-13*
