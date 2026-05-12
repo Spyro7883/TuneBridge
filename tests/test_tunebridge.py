@@ -32,11 +32,16 @@ def app_root():
 # ---------------------------------------------------------------------------
 
 def test_worker_count_formula():
-    assert min(1, 4) == 1
-    assert min(2, 4) == 2
-    assert min(4, 4) == 4
-    assert min(7, 4) == 4
-    assert min(0, 4) == 0
+    """min(batch_size, _MAX_WORKERS) caps at 4; formula must exist in _start_demo."""
+    import inspect, re
+    src = inspect.getsource(TuneBridgeApp._start_demo)
+    assert re.search(r"\bmin\b", src), "_start_demo must use min() for worker cap"
+    cap = TuneBridgeApp._MAX_WORKERS
+    assert cap == 4
+    assert min(1, cap) == 1
+    assert min(4, cap) == 4
+    assert min(5, cap) == 4
+    assert min(10, cap) == 4
 
 
 def test_status_enum_values():

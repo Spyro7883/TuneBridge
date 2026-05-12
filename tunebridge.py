@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """TuneBridge — Phase 1: Foundation."""
 from __future__ import annotations
+import queue
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -111,6 +112,8 @@ class BatchTable(ttk.Frame):
 
     def update_row_status(self, row_id: str, status: str) -> None:
         """Update row status. Must be called from main thread (via after())."""
+        if not self.tree.exists(row_id):
+            return
         tag = self._STATUS_TAG.get(status, "active")
         self.tree.set(row_id, "status", status)
         self.tree.item(row_id, tags=(tag,))
@@ -130,13 +133,35 @@ class BatchTable(ttk.Frame):
 
 
 class TuneBridgeApp(tk.Tk):
+    _MAX_WORKERS = 4
+
     def __init__(self) -> None:
         super().__init__()
+        self._update_queue: queue.Queue = queue.Queue()
         self.title("TuneBridge")
         self.geometry("800x540")
         self.minsize(640, 400)
         self._setup_styles()
         self._build_layout()
+        self._poll_updates()
+
+    def _poll_updates(self) -> None:
+        """Drain the thread-safe update queue on the main thread (~60 fps)."""
+        try:
+            while True:
+                func, args, kwargs = self._update_queue.get_nowait()
+                try:
+                    func(*args, **kwargs)
+                except tk.TclError:
+                    pass
+        except queue.Empty:
+            pass
+        if self.winfo_exists():
+            self.after(16, self._poll_updates)
+
+    def _schedule(self, func, *args, **kwargs) -> None:
+        """Queue a UI update — safe to call from any thread."""
+        self._update_queue.put((func, args, kwargs))
 
     def _setup_styles(self) -> None:
         style = ttk.Style(self)
@@ -223,7 +248,7 @@ class TuneBridgeApp(tk.Tk):
             for url, title in DEMO_URLS
         ]
 
-        max_workers = min(len(iids), 4)
+        max_workers = min(len(iids), self._MAX_WORKERS)
         self._status_var.set(f"Processing 0/{len(iids)}...")
         self._demo_btn.configure(state="disabled")
 
@@ -238,21 +263,21 @@ class TuneBridgeApp(tk.Tk):
                         done_count += 1
                     except Exception:
                         iid = futures[future]
-                        self.after(0, self.table.update_row_status, iid, str(SongStatus.FAILED))
+                        self._schedule(self.table.update_row_status, iid, str(SongStatus.FAILED))
                         failed_count += 1
             if failed_count == 0:
-                self.after(0, self._status_var.set, f"Done — {done_count} tracks processed")
+                self._schedule(self._status_var.set, f"Done — {done_count} tracks processed")
             else:
-                self.after(0, self._status_var.set,
-                           f"Done — {done_count} succeeded, {failed_count} failed")
-            self.after(0, self._demo_btn.configure, {"state": "normal"})
+                self._schedule(self._status_var.set,
+                               f"Done — {done_count} succeeded, {failed_count} failed")
+            self._schedule(self._demo_btn.configure, state="normal")
 
         threading.Thread(target=run, daemon=True).start()
 
     def _mock_worker(self, row_id: str) -> None:
         """Cycles all 8 statuses with simulated delays. Replace in Phase 3+."""
         for status, delay in MOCK_STATUS_DELAYS.items():
-            self.after(0, self.table.update_row_status, row_id, str(status))
+            self._schedule(self.table.update_row_status, row_id, str(status))
             if delay > 0:
                 time.sleep(delay)
 
