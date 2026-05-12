@@ -1,10 +1,11 @@
 ---
 phase: 2
 slug: input-detection
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-05-13
+reviewed_at: 2026-05-13
 ---
 
 # Phase 2: Input & Detection — UI Design Contract
@@ -84,6 +85,8 @@ Source: Phase 1 `_TAG_COLORS`, `_setup_styles()` — extended here, not changed.
 
 ## Components
 
+**Primary focal point:** `_paste_box` (InputPasteArea) — the sole entry point for user action in this phase. Every other element (batch table, status bar) is output-only.
+
 ### 1. InputPasteArea — `tk.Text` widget
 
 Replaces the Phase 1 `_demo_btn` inside `self.input_frame`. The "Start Demo" button is removed.
@@ -99,7 +102,7 @@ self._paste_box = tk.Text(
     relief="flat",
     font=("Segoe UI", 10),
     padx=8,
-    pady=6,
+    pady=8,
     wrap="word",
 )
 ```
@@ -299,11 +302,11 @@ Valid rows end in `status="Queued"`. Phase 3 triggers on separate user action �
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** ✓ APPROVED — 2026-05-13
