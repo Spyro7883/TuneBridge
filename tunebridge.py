@@ -255,6 +255,7 @@ class BatchTable(QWidget):
             2, QHeaderView.ResizeMode.ResizeToContents
         )
         self._table.verticalHeader().setDefaultSectionSize(28)
+        self._table.keyPressEvent = self._handle_key
         layout.addWidget(self._table)
 
         self._rows: dict[int, str] = {}
@@ -303,6 +304,30 @@ class BatchTable(QWidget):
         if item2:
             item2.setText(status)
             item2.setForeground(QBrush(color))
+
+    def remove_selected_rows(self) -> int:
+        """Delete selected rows. Returns count removed."""
+        rows = sorted(
+            {idx.row() for idx in self._table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            self._table.removeRow(row)
+        self._rows = {
+            i: url
+            for i, url in enumerate(
+                self._rows[r] for r in sorted(self._rows) if r not in rows
+            )
+        }
+        return len(rows)
+
+    def _handle_key(self, event) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QTableWidget
+        if event.key() == Qt.Key.Key_Delete:
+            self.remove_selected_rows()
+        else:
+            QTableWidget.keyPressEvent(self._table, event)
 
     def clear(self) -> None:
         self._table.setRowCount(0)
