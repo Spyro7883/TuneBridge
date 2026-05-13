@@ -1,16 +1,104 @@
 # -*- coding: utf-8 -*-
-"""TuneBridge — Phase 1: Foundation."""
+"""TuneBridge — Phase 2: Input & Detection (PySide6 Liquid Glass)."""
 from __future__ import annotations
-import queue
-import time
+
+import re
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
-import tkinter as tk
-from tkinter import ttk
+
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QBrush, QColor
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMainWindow,
+    QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+# ---------------------------------------------------------------------------
+# Liquid Glass QSS theme
+# ---------------------------------------------------------------------------
+
+TUNEBRIDGE_QSS = """
+QMainWindow, QWidget {
+    background-color: #121212;
+    color: #FFFFFF;
+    font-family: "Segoe UI";
+    font-size: 10pt;
+}
+QLabel#title_label {
+    color: #1DB954;
+    font-size: 18pt;
+    font-weight: bold;
+    padding: 8px 0px 4px 0px;
+}
+QTableWidget {
+    background-color: rgba(26, 26, 26, 220);
+    border: 1px solid rgba(255, 255, 255, 20);
+    border-radius: 8px;
+    gridline-color: rgba(255, 255, 255, 10);
+    outline: none;
+}
+QTableWidget::item {
+    padding: 4px 8px;
+    color: #B3B3B3;
+    border: none;
+}
+QTableWidget::item:selected {
+    background-color: rgba(29, 185, 84, 51);
+}
+QHeaderView::section {
+    background-color: rgba(26, 26, 26, 200);
+    color: #B3B3B3;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 20);
+    padding: 6px 8px;
+    font-weight: bold;
+    font-size: 9pt;
+}
+QTextEdit {
+    background-color: rgba(26, 26, 26, 153);
+    border: 1px solid rgba(255, 255, 255, 25);
+    border-radius: 6px;
+    color: #555555;
+    padding: 8px;
+    selection-background-color: rgba(29, 185, 84, 76);
+}
+QStatusBar {
+    background-color: #121212;
+    color: #B3B3B3;
+    font-size: 9pt;
+}
+QScrollBar:vertical {
+    background: #1A1A1A;
+    width: 8px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical {
+    background: #555555;
+    border-radius: 4px;
+    min-height: 20px;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+"""
+
+# ---------------------------------------------------------------------------
+# Domain
+# ---------------------------------------------------------------------------
 
 
-class SongStatus(str, Enum):
+class SongStatus(Enum):
     QUEUED      = "Queued"
     FETCHING    = "Fetching metadata"
     DOWNLOADING = "Downloading"
@@ -18,270 +106,373 @@ class SongStatus(str, Enum):
     AWAITING    = "Awaiting folder"
     SAVING      = "Saving"
     UPLOADING   = "Uploading"
-    DONE        = "Done ✓"
-    FAILED      = "Failed ✗"
-
-    def __str__(self) -> str:
-        return self.value
+    DONE        = "Done"
+    FAILED      = "Failed"
 
 
-MOCK_STATUS_DELAYS = {
-    SongStatus.QUEUED:      0.0,
-    SongStatus.FETCHING:    0.3,
-    SongStatus.DOWNLOADING: 0.8,
-    SongStatus.RETUNING:    0.6,
-    SongStatus.AWAITING:    0.2,
-    SongStatus.SAVING:      0.2,
-    SongStatus.UPLOADING:   0.4,
-    SongStatus.DONE:        0.0,
-}
+# ---------------------------------------------------------------------------
+# URL classification
+# ---------------------------------------------------------------------------
+
+_SPOTIFY_RE = re.compile(r"open\.spotify\.com/(track|album|playlist|artist)/")
+_YOUTUBE_RE = re.compile(r"(youtube\.com/watch\?.*v=|youtu\.be/)")
 
 
-class BatchTable(ttk.Frame):
-    """Scrollable Treeview with per-row status tracking.
+def classify_url(url: str) -> str | None:
+    """Return 'Spotify', 'YouTube', or None."""
+    if not url:
+        return None
+    if _SPOTIFY_RE.search(url):
+        return "Spotify"
+    if _YOUTUBE_RE.search(url):
+        return "YouTube"
+    return None
 
-    Public API (Phase 2+ compatible):
-        add_row(url, title, url_type) -> str   # returns iid
-        update_row_status(row_id, status)       # safe from any thread via after()
-        update_row_title(row_id, title)
-        update_row_type(row_id, url_type)
-        clear()                                 # reset table
-    """
 
-    _TAG_COLORS = {
-        "queued":  {"foreground": "#B3B3B3"},
-        "active":  {"foreground": "#FFFFFF"},
-        "waiting": {"foreground": "#F59E0B"},
-        "done":    {"foreground": "#1DB954"},
-        "failed":  {"foreground": "#EF4444"},
+# ---------------------------------------------------------------------------
+# Thread-safe dispatcher (replaces Phase 1 queue+after pattern)
+# ---------------------------------------------------------------------------
+
+
+class _Dispatcher(QObject):
+    row_status_changed = Signal(int, str)
+
+    def __init__(self, table: "BatchTable"):
+        super().__init__()
+        self.row_status_changed.connect(table.update_row_status)
+
+
+# ---------------------------------------------------------------------------
+# Bento Grid — stat card
+# ---------------------------------------------------------------------------
+
+
+class StatCard(QWidget):
+    def __init__(
+        self,
+        label: str,
+        color_hex: str,
+        sublabel: str,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self._color = color_hex
+        r, g, b = self._hex_to_rgb(color_hex)
+
+        self.setStyleSheet(
+            f"StatCard {{"
+            f"background-color: rgba({r}, {g}, {b}, 15);"
+            f"border: 1px solid rgba({r}, {g}, {b}, 46);"
+            f"border-radius: 8px;"
+            f"}}"
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
+
+        self._count_label = QLabel("0")
+        self._count_label.setStyleSheet(
+            f"color: {color_hex}; font-size: 26pt; font-weight: bold;"
+            " background: transparent; border: none;"
+        )
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        name_lbl = QLabel(label)
+        name_lbl.setStyleSheet(
+            f"color: {color_hex}; font-size: 11pt; font-weight: 600;"
+            " background: transparent; border: none;"
+        )
+        sub_lbl = QLabel(sublabel)
+        sub_lbl.setStyleSheet(
+            "color: #555555; font-size: 9pt;"
+            " background: transparent; border: none;"
+        )
+        text_col.addWidget(name_lbl)
+        text_col.addWidget(sub_lbl)
+
+        layout.addWidget(self._count_label)
+        layout.addLayout(text_col)
+        layout.addStretch()
+
+    def count(self) -> int:
+        return int(self._count_label.text())
+
+    def set_count(self, n: int) -> None:
+        self._count_label.setText(str(n))
+
+    @staticmethod
+    def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+        h = hex_color.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+# ---------------------------------------------------------------------------
+# Batch table
+# ---------------------------------------------------------------------------
+
+
+class BatchTable(QWidget):
+    COLUMNS = ["Title", "Type", "Status"]
+
+    _STATUS_COLORS: dict[str, QColor] = {
+        "Queued":            QColor("#B3B3B3"),
+        "Fetching metadata": QColor("#FFFFFF"),
+        "Downloading":       QColor("#FFFFFF"),
+        "Retuning":          QColor("#FFFFFF"),
+        "Awaiting folder":   QColor("#F59E0B"),
+        "Saving":            QColor("#FFFFFF"),
+        "Uploading":         QColor("#FFFFFF"),
+        "Done":              QColor("#1DB954"),
+        "Failed":            QColor("#EF4444"),
+        "Skipped — bad URL": QColor("#EF4444"),
     }
 
-    _STATUS_TAG = {
-        "Queued":            "queued",
-        "Fetching metadata": "active",
-        "Downloading":       "active",
-        "Retuning":          "active",
-        "Awaiting folder":   "waiting",
-        "Saving":            "active",
-        "Uploading":         "active",
-        "Done ✓":       "done",
-        "Failed ✗":     "failed",
+    _TYPE_COLORS: dict[str, QColor] = {
+        "Spotify":     QColor("#1DB954"),
+        "YouTube":     QColor("#EF4444"),
+        "Invalid URL": QColor("#EF4444"),
     }
 
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, **kwargs)
-        self._rows: dict[str, str] = {}
-        self._build_tree()
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-    def _build_tree(self):
-        vsb = ttk.Scrollbar(self, orient="vertical")
-        self.tree = ttk.Treeview(
-            self,
-            columns=("title", "type", "status"),
-            show="headings",
-            yscrollcommand=vsb.set,
+        self._table = QTableWidget(0, 3)
+        self._table.setHorizontalHeaderLabels(self.COLUMNS)
+        self._table.verticalHeader().hide()
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
         )
-        vsb.configure(command=self.tree.yview)
-
-        self.tree.heading("title",  text="Title")
-        self.tree.heading("type",   text="Type")
-        self.tree.heading("status", text="Status")
-        self.tree.column("title",  width=340, stretch=True,  anchor="w")
-        self.tree.column("type",   width=90,  stretch=False, anchor="center")
-        self.tree.column("status", width=180, stretch=False, anchor="w")
-
-        for tag, opts in self._TAG_COLORS.items():
-            self.tree.tag_configure(tag, **opts)
-
-        vsb.pack(side="right", fill="y")
-        self.tree.pack(side="left", fill="both", expand=True)
-
-    def add_row(self, url: str, title: str = "", url_type: str = "") -> str:
-        """Add a row and return its iid."""
-        if title:
-            display_title = title
-        else:
-            display_title = (url[:60] + "...") if len(url) > 60 else url
-        iid = self.tree.insert(
-            "", "end",
-            values=(display_title, url_type, "Queued"),
-            tags=("queued",),
+        self._table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
         )
-        self._rows[iid] = url
-        return iid
+        self._table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self._table.verticalHeader().setDefaultSectionSize(28)
+        layout.addWidget(self._table)
 
-    def update_row_status(self, row_id: str, status: str) -> None:
-        """Update row status. Must be called from main thread (via after())."""
-        if not self.tree.exists(row_id):
+        self._rows: dict[int, str] = {}
+
+        # Callback set by TuneBridgeApp to reset stat cards on clear
+        self._on_clear: "callable | None" = None
+
+    def add_row(self, url: str, title: str = "", url_type: str = "") -> int:
+        """Add a row and return its int row index."""
+        display = title or ((url[:60] + "…") if len(url) > 60 else url)
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+
+        is_invalid = url_type == "Invalid URL"
+        status_text = "Skipped — bad URL" if is_invalid else "Queued"
+        status_color = self._STATUS_COLORS.get(status_text, QColor("#B3B3B3"))
+        type_color = self._TYPE_COLORS.get(url_type)
+
+        title_item = QTableWidgetItem(display)
+        title_item.setForeground(QBrush(status_color))
+
+        type_item = QTableWidgetItem(url_type)
+        if type_color:
+            type_item.setForeground(QBrush(type_color))
+
+        status_item = QTableWidgetItem(status_text)
+        status_item.setForeground(QBrush(status_color))
+
+        self._table.setItem(row, 0, title_item)
+        self._table.setItem(row, 1, type_item)
+        self._table.setItem(row, 2, status_item)
+        self._rows[row] = url
+        return row
+
+    def update_row_status(self, row_id: int, status: str) -> None:
+        """Update Status column text and color. Does NOT touch Type column."""
+        if row_id >= self._table.rowCount():
             return
-        tag = self._STATUS_TAG.get(status, "active")
-        self.tree.set(row_id, "status", status)
-        self.tree.item(row_id, tags=(tag,))
-
-    def update_row_title(self, row_id: str, title: str) -> None:
-        """Phase 3 calls this to fill in the resolved title."""
-        self.tree.set(row_id, "title", title)
-
-    def update_row_type(self, row_id: str, url_type: str) -> None:
-        """Phase 2 calls this after URL type detection."""
-        self.tree.set(row_id, "type", url_type)
+        color = self._STATUS_COLORS.get(status, QColor("#FFFFFF"))
+        # Update title foreground (col 0)
+        item0 = self._table.item(row_id, 0)
+        if item0:
+            item0.setForeground(QBrush(color))
+        # Update status text+foreground (col 2)
+        item2 = self._table.item(row_id, 2)
+        if item2:
+            item2.setText(status)
+            item2.setForeground(QBrush(color))
 
     def clear(self) -> None:
-        for iid in self.tree.get_children():
-            self.tree.delete(iid)
+        self._table.setRowCount(0)
         self._rows.clear()
+        if self._on_clear:
+            self._on_clear()
 
 
-class TuneBridgeApp(tk.Tk):
+# ---------------------------------------------------------------------------
+# Paste input widget
+# ---------------------------------------------------------------------------
+
+
+class PasteTextEdit(QTextEdit):
+    PLACEHOLDER = "Paste Spotify or YouTube URLs here (one per line)"
+    urls_pasted = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setPlaceholderText(self.PLACEHOLDER)
+        self.setFixedHeight(88)
+        self.setAcceptRichText(False)
+
+    def insertFromMimeData(self, source) -> None:
+        raw = source.text() if source.hasText() else ""
+        if raw.strip():
+            self.urls_pasted.emit(raw)
+        # No super() call — widget stays empty, placeholder remains visible
+
+
+# ---------------------------------------------------------------------------
+# Main window
+# ---------------------------------------------------------------------------
+
+
+class TuneBridgeApp(QMainWindow):
     _MAX_WORKERS = 4
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
-        self._update_queue: queue.Queue = queue.Queue()
-        self.title("TuneBridge")
-        self.geometry("800x540")
-        self.minsize(640, 400)
-        self._setup_styles()
-        self._build_layout()
-        self._poll_updates()
+        self.setWindowTitle("TuneBridge")
+        self.setMinimumSize(800, 520)
+        self.setStyleSheet(TUNEBRIDGE_QSS)
 
-    def _poll_updates(self) -> None:
-        """Drain the thread-safe update queue on the main thread (~60 fps)."""
-        try:
-            while True:
-                func, args, kwargs = self._update_queue.get_nowait()
-                try:
-                    func(*args, **kwargs)
-                except tk.TclError:
-                    pass
-        except queue.Empty:
-            pass
-        if self.winfo_exists():
-            self.after(16, self._poll_updates)
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(20, 16, 20, 8)
+        layout.setSpacing(8)
 
-    def _schedule(self, func, *args, **kwargs) -> None:
-        """Queue a UI update — safe to call from any thread."""
-        self._update_queue.put((func, args, kwargs))
+        # Title
+        title = QLabel("TuneBridge")
+        title.setObjectName("title_label")
+        layout.addWidget(title)
 
-    def _setup_styles(self) -> None:
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        self.configure(bg="#121212")
+        # Paste area
+        self._paste_box = PasteTextEdit(self)
+        self._paste_box.urls_pasted.connect(self._process_urls)
+        layout.addWidget(self._paste_box)
 
-        style.configure("TFrame",       background="#121212")
-        style.configure("Card.TFrame",  background="#1A1A1A")
-        style.configure("TLabel",       background="#121212", foreground="#FFFFFF",
-                                        font=("Segoe UI", 10))
-        style.configure("Dim.TLabel",   background="#121212", foreground="#B3B3B3",
-                                        font=("Segoe UI", 9))
-        style.configure("Title.TLabel", background="#121212", foreground="#1DB954",
-                                        font=("Segoe UI", 18, "bold"))
-        style.configure("TButton",      font=("Segoe UI", 10, "bold"), padding=6)
-        style.configure("Accent.TButton", background="#1DB954", foreground="#000000")
-        style.map("Accent.TButton", background=[("active", "#17A349")])
-        style.configure("Treeview",
-            background="#121212",
-            foreground="#FFFFFF",
-            rowheight=28,
-            fieldbackground="#121212",
-            borderwidth=0,
-            font=("Segoe UI", 10),
+        # Bento Grid stat cards
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(8)
+        self._card_valid = StatCard(
+            label="Valide",
+            color_hex="#1DB954",
+            sublabel="Spotify + YouTube",
         )
-        style.configure("Treeview.Heading",
-            background="#1A1A1A",
-            foreground="#B3B3B3",
-            relief="flat",
-            font=("Segoe UI", 9, "bold"),
+        self._card_invalid = StatCard(
+            label="Invalide",
+            color_hex="#EF4444",
+            sublabel="URL-uri eronate",
         )
-        style.map("Treeview",
-            background=[("selected", "#1DB954")],
-            foreground=[("selected", "#000000")],
-        )
-        style.map("Treeview.Heading", background=[("active", "#222222")])
-        style.configure("Vertical.TScrollbar",
-            background="#2A2A2A",
-            troughcolor="#121212",
-            arrowcolor="#B3B3B3",
-            borderwidth=0,
-        )
+        cards_row.addWidget(self._card_valid)
+        cards_row.addWidget(self._card_invalid)
+        layout.addLayout(cards_row)
 
-    def _build_layout(self) -> None:
-        # 1. Title header
-        ttk.Label(self, text="TuneBridge", style="Title.TLabel").pack(
-            anchor="w", padx=20, pady=(16, 4))
-
-        # 2. Input placeholder frame (Phase 2 populates this)
-        self.input_frame = ttk.Frame(self, height=60, style="TFrame")
-        self.input_frame.pack(fill="x", padx=20, pady=(4, 8))
-        self.input_frame.pack_propagate(False)
-
-        # Start Demo button inside input_frame (Phase 1 only)
-        self._demo_btn = ttk.Button(
-            self.input_frame,
-            text="Start Demo",
-            style="Accent.TButton",
-            command=self._start_demo,
-        )
-        self._demo_btn.pack(side="left", padx=8, pady=8)
-
-        # 3. Batch table (dominant area)
+        # Batch table
         self.table = BatchTable(self)
-        self.table.pack(fill="both", expand=True, padx=20, pady=(0, 8))
+        # Wire clear() to reset both stat cards
+        self.table._on_clear = lambda: (
+            self._card_valid.set_count(0),
+            self._card_invalid.set_count(0),
+        )
+        layout.addWidget(self.table)
 
-        # 4. Status bar (bottom)
-        self._status_var = tk.StringVar(value="Ready — add songs to begin")
-        ttk.Label(self, textvariable=self._status_var,
-                  style="Dim.TLabel").pack(fill="x", padx=20, pady=(0, 10), anchor="w")
+        # Thread dispatcher
+        self._dispatcher = _Dispatcher(self.table)
+
+        # Status bar
+        self.statusBar().showMessage("Ready — add songs to begin")
+
+    def _process_urls(self, raw: str) -> None:
+        lines = [line.strip() for line in raw.splitlines()]
+        candidates = [line for line in lines if line]
+        if not candidates:
+            return
+
+        valid_count = 0
+        invalid_count = 0
+        for url in candidates:
+            url_type = classify_url(url)
+            if url_type is not None:
+                self.table.add_row(url=url, url_type=url_type)
+                valid_count += 1
+            else:
+                self.table.add_row(url=url, url_type="Invalid URL")
+                invalid_count += 1
+
+        self._card_valid.set_count(self._card_valid.count() + valid_count)
+        self._card_invalid.set_count(self._card_invalid.count() + invalid_count)
+
+        if valid_count > 0:
+            self.statusBar().showMessage(
+                f"{valid_count} URL(s) added — paste more or start processing"
+            )
+        else:
+            self.statusBar().showMessage(
+                "No valid URLs found — check your links"
+            )
+
+    def _clear_all(self) -> None:
+        """Explicit clear — also triggered via table._on_clear."""
+        self.table.clear()
 
     def _start_demo(self) -> None:
+        """Demo worker — kept for Phase 1 backward-compat and test_worker_count_formula."""
         DEMO_URLS = [
-            ("https://open.spotify.com/track/demo1", "Demo Song 1"),
-            ("https://open.spotify.com/track/demo2", "Demo Song 2"),
-            ("https://open.spotify.com/track/demo3", "Demo Song 3"),
-            ("https://open.spotify.com/track/demo4", "Demo Song 4"),
-            ("https://open.spotify.com/track/demo5", "Demo Song 5"),
+            "https://open.spotify.com/track/demo1",
+            "https://open.spotify.com/track/demo2",
+            "https://open.spotify.com/track/demo3",
+            "https://open.spotify.com/track/demo4",
+            "https://open.spotify.com/track/demo5",
         ]
-
-        self.table.clear()
-        iids = [
-            self.table.add_row(url=url, title=title)
-            for url, title in DEMO_URLS
-        ]
-
-        max_workers = min(len(iids), self._MAX_WORKERS)
-        self._status_var.set(f"Processing 0/{len(iids)}...")
-        self._demo_btn.configure(state="disabled")
+        row_ids = [self.table.add_row(url=u, url_type="Spotify") for u in DEMO_URLS]
+        max_workers = min(len(row_ids), self._MAX_WORKERS)
 
         def run():
-            done_count = 0
-            failed_count = 0
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {pool.submit(self._mock_worker, iid): iid for iid in iids}
+                futures = {
+                    pool.submit(self._mock_worker, rid): rid for rid in row_ids
+                }
                 for future in as_completed(futures):
                     try:
                         future.result()
-                        done_count += 1
                     except Exception:
-                        iid = futures[future]
-                        self._schedule(self.table.update_row_status, iid, str(SongStatus.FAILED))
-                        failed_count += 1
-            if failed_count == 0:
-                self._schedule(self._status_var.set, f"Done — {done_count} tracks processed")
-            else:
-                self._schedule(self._status_var.set,
-                               f"Done — {done_count} succeeded, {failed_count} failed")
-            self._schedule(self._demo_btn.configure, state="normal")
+                        rid = futures[future]
+                        self._dispatcher.row_status_changed.emit(
+                            rid, SongStatus.FAILED.value
+                        )
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _mock_worker(self, row_id: str) -> None:
-        """Cycles all 8 statuses with simulated delays. Replace in Phase 3+."""
-        for status, delay in MOCK_STATUS_DELAYS.items():
-            self._schedule(self.table.update_row_status, row_id, str(status))
-            if delay > 0:
-                time.sleep(delay)
+    def _mock_worker(self, row_id: int) -> None:
+        """Simulated worker — cycles statuses for demo."""
+        import time
+        statuses = [
+            SongStatus.FETCHING,
+            SongStatus.DOWNLOADING,
+            SongStatus.RETUNING,
+            SongStatus.SAVING,
+            SongStatus.DONE,
+        ]
+        for status in statuses:
+            self._dispatcher.row_status_changed.emit(row_id, status.value)
+            time.sleep(0.1)
 
 
 if __name__ == "__main__":
-    app = TuneBridgeApp()
-    app.mainloop()
+    app = QApplication(sys.argv)
+    window = TuneBridgeApp()
+    window.show()
+    sys.exit(app.exec())

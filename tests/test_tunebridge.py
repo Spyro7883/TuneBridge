@@ -1,47 +1,86 @@
 # -*- coding: utf-8 -*-
-# Note: sys.stdout UTF-8 wrapper intentionally omitted — pytest's capture plugin
-# owns sys.stdout during collection/execution; wrapping it causes ValueError.
-# Unicode characters (✓/✗) are handled by the # -*- coding: utf-8 -*- header.
-import pytest
-import tkinter as tk
-from tkinter import ttk
+"""Tests for TuneBridge Phase 2 — PySide6 implementation."""
+import inspect
+import re
 
-try:
-    from tunebridge import TuneBridgeApp, BatchTable, SongStatus
-except ImportError:
-    # tunebridge.py does not exist yet (RED state — Plan 02 creates it).
-    # Tests are collected normally; they fail at runtime with NameError,
-    # which satisfies the TDD RED requirement.
-    TuneBridgeApp = None  # type: ignore[assignment,misc]
-    BatchTable = None     # type: ignore[assignment,misc]
-    SongStatus = None     # type: ignore[assignment,misc]
+import pytest
+
+from PySide6.QtCore import QMimeData
+from PySide6.QtWidgets import QApplication
+
+from tunebridge import (
+    BatchTable,
+    PasteTextEdit,
+    SongStatus,
+    StatCard,
+    TuneBridgeApp,
+    _Dispatcher,
+    classify_url,
+)
+
+
+# ---------------------------------------------------------------------------
+# QApplication singleton for all tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def qapp():
+    app = QApplication.instance() or QApplication([])
+    return app
 
 
 @pytest.fixture
-def app_root():
-    app = TuneBridgeApp()
-    app.withdraw()
-    try:
-        yield app
-    finally:
-        app.destroy()
+def window(qapp):
+    w = TuneBridgeApp()
+    yield w
+    w.close()
+    w.deleteLater()
 
 
 # ---------------------------------------------------------------------------
-# Pure / no-fixture tests
+# classify_url — pure function, no fixtures needed
 # ---------------------------------------------------------------------------
 
-def test_worker_count_formula():
-    """min(batch_size, _MAX_WORKERS) caps at 4; formula must exist in _start_demo."""
-    import inspect, re
-    src = inspect.getsource(TuneBridgeApp._start_demo)
-    assert re.search(r"\bmin\b", src), "_start_demo must use min() for worker cap"
-    cap = TuneBridgeApp._MAX_WORKERS
-    assert cap == 4
-    assert min(1, cap) == 1
-    assert min(4, cap) == 4
-    assert min(5, cap) == 4
-    assert min(10, cap) == 4
+
+def test_classify_spotify_track():
+    assert classify_url("https://open.spotify.com/track/abc123") == "Spotify"
+
+
+def test_classify_spotify_album():
+    assert classify_url("https://open.spotify.com/album/xyz789") == "Spotify"
+
+
+def test_classify_spotify_playlist():
+    assert classify_url("https://open.spotify.com/playlist/pl123") == "Spotify"
+
+
+def test_classify_spotify_artist():
+    assert classify_url("https://open.spotify.com/artist/ar123") == "Spotify"
+
+
+def test_classify_youtube_watch():
+    assert classify_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "YouTube"
+
+
+def test_classify_youtube_short():
+    assert classify_url("https://youtu.be/dQw4w9WgXcQ") == "YouTube"
+
+
+def test_classify_invalid_returns_none():
+    assert classify_url("https://example.com/song") is None
+
+
+def test_classify_empty_string():
+    assert classify_url("") is None
+
+
+def test_classify_none_like_blank():
+    assert classify_url("   ") is None
+
+
+# ---------------------------------------------------------------------------
+# SongStatus enum
+# ---------------------------------------------------------------------------
 
 
 def test_status_enum_values():
@@ -53,49 +92,163 @@ def test_status_enum_values():
         "Awaiting folder",
         "Saving",
         "Uploading",
-        "Done ✓",
-        "Failed ✗",
+        "Done",
+        "Failed",
     ]
     assert [s.value for s in SongStatus] == expected
 
 
 # ---------------------------------------------------------------------------
-# Tkinter-touching tests — require app_root fixture
+# StatCard widget
 # ---------------------------------------------------------------------------
 
-def test_app_initializes(app_root):
-    assert isinstance(app_root, tk.Tk)
+
+def test_stat_card_initial_count(qapp):
+    card = StatCard(label="Valid", color_hex="#1DB954", sublabel="test")
+    assert card.count() == 0
 
 
-def test_dark_theme_colors(app_root):
-    style = ttk.Style(app_root)
-    assert style.lookup("TLabel", "background") == "#121212"
-    assert style.lookup("Title.TLabel", "foreground") == "#1DB954"
+def test_stat_card_set_count(qapp):
+    card = StatCard(label="Valid", color_hex="#1DB954", sublabel="test")
+    card.set_count(7)
+    assert card.count() == 7
 
 
-def test_batch_table_columns(app_root):
-    assert app_root.table.tree["columns"] == ("title", "type", "status")
+def test_stat_card_set_count_zero(qapp):
+    card = StatCard(label="Valid", color_hex="#1DB954", sublabel="test")
+    card.set_count(5)
+    card.set_count(0)
+    assert card.count() == 0
 
 
-def test_batch_table_api(app_root):
-    iid = app_root.table.add_row("https://example.com", "Test Song", "[Spotify]")
-    assert iid  # non-empty string
-    # Should not raise
-    app_root.table.update_row_status(iid, "Downloading")
-    assert app_root.table.tree.set(iid, "status") == "Downloading"
+# ---------------------------------------------------------------------------
+# TuneBridgeApp — window-level tests
+# ---------------------------------------------------------------------------
 
 
-def test_status_tags(app_root):
-    iid = app_root.table.add_row("https://example.com", "Tag Test", "[YouTube]")
+def test_app_window_title(window):
+    assert window.windowTitle() == "TuneBridge"
 
-    app_root.table.update_row_status(iid, "Done ✓")
-    app_root.update()
-    assert app_root.table.tree.item(iid, "tags") == ("done",)
 
-    app_root.table.update_row_status(iid, "Failed ✗")
-    app_root.update()
-    assert app_root.table.tree.item(iid, "tags") == ("failed",)
+def test_app_stylesheet_contains_theme(window):
+    assert "#121212" in window.styleSheet()
 
-    app_root.table.update_row_status(iid, "Awaiting folder")
-    app_root.update()
-    assert app_root.table.tree.item(iid, "tags") == ("waiting",)
+
+def test_app_max_workers(window):
+    assert TuneBridgeApp._MAX_WORKERS == 4
+
+
+def test_app_has_table(window):
+    assert isinstance(window.table, BatchTable)
+
+
+def test_app_has_stat_cards(window):
+    assert isinstance(window._card_valid, StatCard)
+    assert isinstance(window._card_invalid, StatCard)
+
+
+def test_app_stat_cards_initial_zero(window):
+    assert window._card_valid.count() == 0
+    assert window._card_invalid.count() == 0
+
+
+# ---------------------------------------------------------------------------
+# BatchTable
+# ---------------------------------------------------------------------------
+
+
+def test_batch_table_add_row_returns_int(window):
+    row_id = window.table.add_row(url="https://open.spotify.com/track/x", url_type="Spotify")
+    assert isinstance(row_id, int)
+
+
+def test_batch_table_add_row_increments(window):
+    r0 = window.table.add_row(url="https://open.spotify.com/track/a", url_type="Spotify")
+    r1 = window.table.add_row(url="https://open.spotify.com/track/b", url_type="Spotify")
+    assert r1 == r0 + 1
+
+
+def test_batch_table_update_row_status(window):
+    row_id = window.table.add_row(url="https://open.spotify.com/track/x", url_type="Spotify")
+    window.table.update_row_status(row_id, "Done")
+    item = window.table._table.item(row_id, 2)
+    assert item is not None
+    assert item.text() == "Done"
+
+
+def test_batch_table_update_row_status_does_not_touch_type(window):
+    row_id = window.table.add_row(url="https://open.spotify.com/track/x", url_type="Spotify")
+    type_text_before = window.table._table.item(row_id, 1).text()
+    window.table.update_row_status(row_id, "Done")
+    type_text_after = window.table._table.item(row_id, 1).text()
+    assert type_text_before == type_text_after == "Spotify"
+
+
+def test_batch_table_clear_empties_rows(window):
+    window.table.add_row(url="https://open.spotify.com/track/x", url_type="Spotify")
+    window.table.clear()
+    assert window.table._table.rowCount() == 0
+
+
+def test_batch_table_clear_resets_stat_cards(window):
+    # Simulate paste to increment cards
+    window._process_urls("https://open.spotify.com/track/a\nhttps://open.spotify.com/track/b")
+    assert window._card_valid.count() > 0
+    window.table.clear()
+    assert window._card_valid.count() == 0
+    assert window._card_invalid.count() == 0
+
+
+def test_batch_table_invalid_url_row(window):
+    row_id = window.table.add_row(url="https://bad.example.com", url_type="Invalid URL")
+    type_item = window.table._table.item(row_id, 1)
+    status_item = window.table._table.item(row_id, 2)
+    assert type_item.text() == "Invalid URL"
+    assert status_item.text() == "Skipped — bad URL"
+
+
+# ---------------------------------------------------------------------------
+# _process_urls — stat card wiring
+# ---------------------------------------------------------------------------
+
+
+def test_process_urls_increments_valid_card(window):
+    before = window._card_valid.count()
+    window._process_urls(
+        "https://open.spotify.com/track/x\nhttps://www.youtube.com/watch?v=abc"
+    )
+    assert window._card_valid.count() == before + 2
+
+
+def test_process_urls_increments_invalid_card(window):
+    before = window._card_invalid.count()
+    window._process_urls("https://not-a-valid-url.com/page")
+    assert window._card_invalid.count() == before + 1
+
+
+def test_process_urls_status_bar_valid(window):
+    window._process_urls("https://open.spotify.com/track/x")
+    msg = window.statusBar().currentMessage()
+    assert "URL(s) added" in msg
+
+
+def test_process_urls_status_bar_all_invalid(window):
+    window._process_urls("https://random.invalid/link")
+    msg = window.statusBar().currentMessage()
+    assert "No valid URLs found" in msg
+
+
+# ---------------------------------------------------------------------------
+# _start_demo — worker cap formula
+# ---------------------------------------------------------------------------
+
+
+def test_worker_count_formula():
+    src = inspect.getsource(TuneBridgeApp._start_demo)
+    assert re.search(r"\bmin\b", src), "_start_demo must use min() for worker cap"
+    cap = TuneBridgeApp._MAX_WORKERS
+    assert cap == 4
+    assert min(1, cap) == 1
+    assert min(4, cap) == 4
+    assert min(5, cap) == 4
+    assert min(10, cap) == 4
