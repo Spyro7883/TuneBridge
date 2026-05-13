@@ -9,7 +9,7 @@
 ## Phases
 
 - [x] **Phase 1: Foundation** — Dark GUI shell, batch table scaffold, threaded pipeline infrastructure, status state machine
-- [ ] **Phase 2: Input & Detection** — Paste area, URL type classification, type badges, inline per-row error display
+- [x] **Phase 2: Input & Detection** — Paste area, URL type classification, type badges, inline per-row error display
 - [ ] **Phase 3: Metadata Services** — Spotify Web API client, yt-dlp info extraction, "(guessed)" label convention
 - [ ] **Phase 4: Download Pipeline** — Dual-path download (ytsearch vs direct), 432Hz retune toggle, audio-only MP3 output
 - [ ] **Phase 5: Organization** — Folder proposal logic, per-song folder confirmation dialog with threading.Event safety, skip support, file save

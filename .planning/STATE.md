@@ -1,9 +1,9 @@
 ---
 milestone: v1.0
 name: Full Pipeline
-status: executing
+status: planning
 progress:
-  phases_complete: 1
+  phases_complete: 2
   phases_total: 6
   plans_complete: 4
   plans_total: 4
@@ -11,10 +11,10 @@ progress:
 
 ## Current Position
 
-Phase: Phase 2 — Input & Detection (executing — awaiting verification)
-Plan: 02-02 complete
-Status: All plans executed — 31/31 tests GREEN — pending phase verification
-Last activity: 2026-05-13 — Phase 2 executed: PySide6 migration + classify_url + PasteTextEdit + StatCard Bento Grid
+Phase: Phase 3 — Metadata Services (not started)
+Plan: —
+Status: Phase 2 complete — ready to discuss/plan Phase 3
+Last activity: 2026-05-13 — Phase 2 complete: PySide6 + classify_url + PasteTextEdit + StatCard — 31/31 tests GREEN, 10/10 verified
 
 ## Decisions
 
