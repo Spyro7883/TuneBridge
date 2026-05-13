@@ -229,7 +229,7 @@ def test_process_urls_increments_invalid_card(window):
 def test_process_urls_status_bar_valid(window):
     window._process_urls("https://open.spotify.com/track/x")
     msg = window.statusBar().currentMessage()
-    assert "URL(s) added" in msg
+    assert "added" in msg and "ready" in msg
 
 
 def test_process_urls_status_bar_all_invalid(window):
