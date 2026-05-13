@@ -57,7 +57,20 @@ Plans:
   1. A Spotify URL row transitions to "Fetching metadata" and populates artist, album, title, and release type using Spotify client credentials (no user login required)
   2. A YouTube URL row transitions to "Fetching metadata" and populates title and channel name via yt-dlp info extraction without calling Spotify
   3. Fields inferred by parsing a YouTube title (artist, track title) are visibly labeled "(guessed)" in the batch row — never shown without the label
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+- [ ] 03-01-PLAN.md — SpotifyClient (token cache + track/album) + module-level imports + SongStatus.METADATA_READY + .env loading + credential gating
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 03-02-PLAN.md — YoutubeExtractor (yt-dlp info, no download) + D-08/D-09 title parser with (guessed) labels + _yt_extractor wiring
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 03-03-PLAN.md — fetch_metadata_for_row routing function + _SPOTIFY_RESOURCE_RE regex + _Dispatcher.metadata_ready Signal(int, object)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 03-04-PLAN.md — Full BatchTable.update_row_metadata (D-05/D-06/D-09) + persistent ThreadPoolExecutor + _metadata_worker + auto-fetch wiring (D-03) + closeEvent
 
 ### Phase 4: Download Pipeline
 **Goal**: Every song in the batch downloads as an audio-only MP3, with optional 432Hz retune applied, using the correct path for its URL type
