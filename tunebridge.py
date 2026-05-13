@@ -415,14 +415,17 @@ class TuneBridgeApp(QMainWindow):
         self._card_valid.set_count(self._card_valid.count() + valid_count)
         self._card_invalid.set_count(self._card_invalid.count() + invalid_count)
 
+        total_valid = self._card_valid.count()
         if valid_count > 0:
             self.statusBar().showMessage(
-                f"{valid_count} URL(s) added — paste more or start processing"
+                f"{valid_count} added — {total_valid} URL(s) ready, paste more or start processing"
             )
         else:
             self.statusBar().showMessage(
                 "No valid URLs found — check your links"
             )
+
+        self._paste_box.setFocus()
 
     def _clear_all(self) -> None:
         """Explicit clear — also triggered via table._on_clear."""
