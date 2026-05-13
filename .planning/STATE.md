@@ -1,20 +1,20 @@
 ---
 milestone: v1.0
 name: Full Pipeline
-status: planning
+status: executing
 progress:
   phases_complete: 1
   phases_total: 6
-  plans_complete: 2
-  plans_total: 2
+  plans_complete: 4
+  plans_total: 4
 ---
 
 ## Current Position
 
-Phase: Phase 2 — Input & Detection (context gathered)
-Plan: —
-Status: Context captured; ready for Phase 2 planning
-Last activity: 2026-05-13 — Phase 2 context gathered (paste trigger: auto-on-paste; badges: row tags)
+Phase: Phase 2 — Input & Detection (executing — awaiting verification)
+Plan: 02-02 complete
+Status: All plans executed — 31/31 tests GREEN — pending phase verification
+Last activity: 2026-05-13 — Phase 2 executed: PySide6 migration + classify_url + PasteTextEdit + StatCard Bento Grid
 
 ## Decisions
 
@@ -26,6 +26,8 @@ Last activity: 2026-05-13 — Phase 2 context gathered (paste trigger: auto-on-p
 - Phase 1 bundles GUI shell + thread infrastructure + status state machine (PROC-01, PROC-02, GUI-01) — these are tightly coupled; no value in splitting
 - Organization phase (Phase 5) owns the folder confirmation dialog with all threading.Event safety layers
 - iBroadcast upload isolated in Phase 6 — independent of folder logic, can be developed and tested separately
+- Phase 2 migrated from tkinter to PySide6 (Liquid Glass QSS) — framework decision locked
+- StatCard Bento Grid widgets added (Valid/Invalid URL counters) — design from mockup.txt
 
 ## Blockers
 
@@ -33,4 +35,4 @@ Last activity: 2026-05-13 — Phase 2 context gathered (paste trigger: auto-on-p
 
 ## Todos
 
-- Run `/gsd-plan-phase 2` to decompose Phase 2: Input & Detection into executable plans
+(none)

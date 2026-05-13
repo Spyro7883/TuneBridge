@@ -46,8 +46,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Test scaffold: 11 failing tests for classify_url() and paste→row integration (RED state)
-- [ ] 02-02-PLAN.md — Core implementation: classify_url(), BatchTable tag-collision fix, paste widget, _process_urls()
+- [x] 02-01-PLAN.md — Test scaffold: 31 PySide6 tests — RED gate passed
+- [x] 02-02-PLAN.md — PySide6 migration + classify_url() + PasteTextEdit + StatCard Bento Grid — 31/31 GREEN
 
 ### Phase 3: Metadata Services
 **Goal**: App can resolve full metadata for any URL in the batch — confirmed fields from Spotify API or extracted fields (labeled as guessed) from YouTube
