@@ -612,8 +612,8 @@ class TuneBridgeApp(QMainWindow):
             self._spotify_client  = None
             self._spotify_enabled = False
 
-        # YouTube extractor placeholder — Plan 02 of Phase 3 instantiates the real class.
-        self._yt_extractor = None
+        # YouTube extractor — no credentials required (META-02)
+        self._yt_extractor = YoutubeExtractor()
 
         # Status bar
         if self._spotify_enabled:
