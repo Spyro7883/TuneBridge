@@ -456,6 +456,39 @@ class BatchTable(QWidget):
             item2.setText(status)
             item2.setForeground(QBrush(color))
 
+    def update_row_metadata(self, row_id: int, metadata: dict) -> None:
+        """Write human-readable display label to col 0, update status to 'Metadata ready'.
+
+        Called on main thread via queued Signal connection (Pattern 5).
+        """
+        if row_id >= self._table.rowCount():
+            return
+        source = metadata.get("source", "")
+        if source == "Spotify":
+            artist = metadata.get("artist", "")
+            # Distinguish album URLs (no "title" key) from track URLs (has "title" key).
+            # release_type reflects the album type of the containing album for tracks —
+            # do NOT use it to choose display format. Presence of "title" means it's a track.
+            if "title" in metadata:
+                label = f"{artist} — {metadata.get('title', '')}"
+            else:
+                label = f"{artist} — {metadata.get('album', '')} [album]"
+        else:  # YouTube
+            artist = metadata.get("artist", "")
+            track  = metadata.get("track_title", metadata.get("title", ""))
+            if artist:
+                label = f"{artist} — {track}"
+            else:
+                label = f"(guessed) — {track}"
+
+        color = self._STATUS_COLORS.get("Metadata ready", QColor("#1DB954"))
+        item0 = self._table.item(row_id, 0)
+        if item0:
+            item0.setText(label)
+            item0.setForeground(QBrush(color))
+
+        self.update_row_status(row_id, SongStatus.METADATA_READY.value)
+
     def remove_selected_rows(self) -> int:
         """Delete selected rows. Returns count removed."""
         rows = sorted(
@@ -569,8 +602,27 @@ class TuneBridgeApp(QMainWindow):
         # Thread dispatcher
         self._dispatcher = _Dispatcher(self.table)
 
+        # Spotify credential gating (D-01, D-02)
+        client_id     = os.getenv("SPOTIFY_CLIENT_ID", "").strip()
+        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET", "").strip()
+        if client_id and client_secret:
+            self._spotify_client  = SpotifyClient(client_id, client_secret)
+            self._spotify_enabled = True
+        else:
+            self._spotify_client  = None
+            self._spotify_enabled = False
+
+        # YouTube extractor placeholder — Plan 02 of Phase 3 instantiates the real class.
+        self._yt_extractor = None
+
         # Status bar
-        self.statusBar().showMessage("Ready — add songs to begin")
+        if self._spotify_enabled:
+            self.statusBar().showMessage("Ready — add songs to begin")
+        else:
+            self.statusBar().showMessage(
+                "Spotify credentials not found — Spotify rows will be skipped. "
+                "Add .env with SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET."
+            )
 
     def _process_urls(self, raw: str) -> None:
         lines = [line.strip() for line in raw.splitlines()]
