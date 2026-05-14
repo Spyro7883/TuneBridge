@@ -2,11 +2,18 @@
 """TuneBridge — Phase 2: Input & Detection (PySide6 Liquid Glass)."""
 from __future__ import annotations
 
+import base64
+import os
 import re
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
+
+import requests
+import yt_dlp
+from dotenv import load_dotenv
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QBrush, QColor
@@ -99,15 +106,16 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 
 
 class SongStatus(Enum):
-    QUEUED      = "Queued"
-    FETCHING    = "Fetching metadata"
-    DOWNLOADING = "Downloading"
-    RETUNING    = "Retuning"
-    AWAITING    = "Awaiting folder"
-    SAVING      = "Saving"
-    UPLOADING   = "Uploading"
-    DONE        = "Done"
-    FAILED      = "Failed"
+    QUEUED          = "Queued"
+    FETCHING        = "Fetching metadata"
+    DOWNLOADING     = "Downloading"
+    RETUNING        = "Retuning"
+    AWAITING        = "Awaiting folder"
+    SAVING          = "Saving"
+    UPLOADING       = "Uploading"
+    DONE            = "Done"
+    FAILED          = "Failed"
+    METADATA_READY  = "Metadata ready"
 
 
 # ---------------------------------------------------------------------------
@@ -136,10 +144,155 @@ def classify_url(url: str) -> str | None:
 
 class _Dispatcher(QObject):
     row_status_changed = Signal(int, str)
+    metadata_ready     = Signal(int, object)   # (row_id, metadata_dict) — crosses thread boundary
 
     def __init__(self, table: "BatchTable"):
         super().__init__()
         self.row_status_changed.connect(table.update_row_status)
+        self.metadata_ready.connect(table.update_row_metadata)
+
+
+# ---------------------------------------------------------------------------
+# Spotify Web API client (client credentials flow, token cached per TTL)
+# ---------------------------------------------------------------------------
+
+
+class SpotifyClient:
+    """Spotify Web API client using OAuth2 client credentials flow.
+
+    Token is cached in-memory until `expires_in - TTL_BUFFER` seconds elapse.
+    No user login — read-only metadata access (META-01).
+    """
+
+    TOKEN_URL  = "https://accounts.spotify.com/api/token"
+    API_BASE   = "https://api.spotify.com/v1"
+    TTL_BUFFER = 60  # seconds before nominal expiry to refresh
+
+    def __init__(self, client_id: str, client_secret: str):
+        self._client_id     = client_id
+        self._client_secret = client_secret
+        self._token:        str | None = None
+        self._token_expiry: float      = 0.0
+
+    def _get_token(self) -> str:
+        if self._token and time.time() < self._token_expiry:
+            return self._token
+        credentials = base64.b64encode(
+            f"{self._client_id}:{self._client_secret}".encode()
+        ).decode()
+        resp = requests.post(
+            self.TOKEN_URL,
+            headers={"Authorization": f"Basic {credentials}"},
+            data={"grant_type": "client_credentials"},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        self._token        = payload["access_token"]
+        self._token_expiry = time.time() + payload["expires_in"] - self.TTL_BUFFER
+        return self._token
+
+    def get_track_metadata(self, track_id: str) -> dict:
+        token = self._get_token()
+        resp = requests.get(
+            f"{self.API_BASE}/tracks/{track_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "artist":       data["artists"][0]["name"],
+            "title":        data["name"],
+            "album":        data["album"]["name"],
+            "release_type": data["album"]["album_type"],
+        }
+
+    def get_album_metadata(self, album_id: str) -> dict:
+        token = self._get_token()
+        resp = requests.get(
+            f"{self.API_BASE}/albums/{album_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "artist":       data["artists"][0]["name"],
+            "album":        data["name"],
+            "release_type": data["album_type"],
+        }
+
+
+# ---------------------------------------------------------------------------
+# YouTube metadata extractor (yt-dlp info extraction, no download)
+# ---------------------------------------------------------------------------
+
+
+class YoutubeExtractor:
+    """Extract video metadata via yt-dlp without downloading.
+
+    Title is parsed for artist/track_title using ' - ' separator (D-08, D-09).
+    Parsed fields are labeled '(guessed)' — never presented as confirmed (META-03).
+    """
+
+    _YDL_OPTS = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": False,
+        "noplaylist": True,
+    }
+
+    def extract_metadata(self, url: str) -> dict:
+        with yt_dlp.YoutubeDL(self._YDL_OPTS) as ydl:
+            info = ydl.extract_info(url, download=False)
+        result = {
+            "title":   info.get("title", ""),
+            "channel": info.get("channel") or info.get("uploader", ""),
+        }
+        raw_title = info.get("title", "")
+        if " - " in raw_title:
+            artist_part, track_part = raw_title.split(" - ", 1)
+            result["artist"]      = f"{artist_part} (guessed)"
+            result["track_title"] = f"{track_part} (guessed)"
+        else:
+            # D-09: no separator — no artist field; raw title shown as guessed display
+            result["track_title"] = f"{raw_title} (guessed)"
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Metadata routing — Spotify vs YouTube
+# ---------------------------------------------------------------------------
+
+# Resource extractor for fetch_metadata_for_row. Handles locale prefixes:
+#   /track/{id}, /album/{id}, /en/track/{id}, /intl-ro/track/{id}, etc.
+_SPOTIFY_RESOURCE_RE = re.compile(
+    r"open\.spotify\.com/(?:[a-z]{2}/)?(?:intl-[a-z]+/)?(track|album)/([A-Za-z0-9]+)"
+)
+
+
+def fetch_metadata_for_row(
+    url: str,
+    url_type: str,
+    spotify_client: "SpotifyClient | None",
+    yt_extractor: "YoutubeExtractor",
+) -> dict:
+    """Route metadata fetch to the correct service based on url_type.
+
+    Returns a dict with a 'source' key added ('Spotify' or 'YouTube').
+    """
+    if url_type == "Spotify":
+        m = _SPOTIFY_RESOURCE_RE.search(url)
+        resource_type = m.group(1) if m else "track"
+        resource_id   = m.group(2) if m else url.split("/")[-1].split("?")[0]
+        if resource_type == "album":
+            metadata = spotify_client.get_album_metadata(resource_id)
+        else:
+            metadata = spotify_client.get_track_metadata(resource_id)
+        metadata["source"] = "Spotify"
+        return metadata
+    else:  # YouTube
+        metadata = yt_extractor.extract_metadata(url)
+        metadata["source"] = "YouTube"
+        return metadata
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +380,8 @@ class BatchTable(QWidget):
         "Done":              QColor("#1DB954"),
         "Failed":            QColor("#EF4444"),
         "Skipped — bad URL": QColor("#EF4444"),
+        "Metadata ready":    QColor("#1DB954"),
+        "Failed — metadata": QColor("#EF4444"),
     }
 
     _TYPE_COLORS: dict[str, QColor] = {
@@ -305,6 +460,39 @@ class BatchTable(QWidget):
             item2.setText(status)
             item2.setForeground(QBrush(color))
 
+    def update_row_metadata(self, row_id: int, metadata: dict) -> None:
+        """Write human-readable display label to col 0, update status to 'Metadata ready'.
+
+        Called on main thread via queued Signal connection (Pattern 5).
+        """
+        if row_id >= self._table.rowCount():
+            return
+        source = metadata.get("source", "")
+        if source == "Spotify":
+            artist = metadata.get("artist", "")
+            # Distinguish album URLs (no "title" key) from track URLs (has "title" key).
+            # release_type reflects the album type of the containing album for tracks —
+            # do NOT use it to choose display format. Presence of "title" means it's a track.
+            if "title" in metadata:
+                label = f"{artist} — {metadata.get('title', '')}"
+            else:
+                label = f"{artist} — {metadata.get('album', '')} [album]"
+        else:  # YouTube
+            artist = metadata.get("artist", "")
+            track  = metadata.get("track_title", metadata.get("title", ""))
+            if artist:
+                label = f"{artist} — {track}"
+            else:
+                label = f"(guessed) — {track}"
+
+        color = self._STATUS_COLORS.get("Metadata ready", QColor("#1DB954"))
+        item0 = self._table.item(row_id, 0)
+        if item0:
+            item0.setText(label)
+            item0.setForeground(QBrush(color))
+
+        self.update_row_status(row_id, SongStatus.METADATA_READY.value)
+
     def remove_selected_rows(self) -> int:
         """Delete selected rows. Returns count removed."""
         rows = sorted(
@@ -368,6 +556,7 @@ class TuneBridgeApp(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        load_dotenv()  # D-01: .env credentials loaded once at startup
         self.setWindowTitle("TuneBridge")
         self.setMinimumSize(800, 520)
         self.setStyleSheet(TUNEBRIDGE_QSS)
@@ -417,8 +606,27 @@ class TuneBridgeApp(QMainWindow):
         # Thread dispatcher
         self._dispatcher = _Dispatcher(self.table)
 
+        # Spotify credential gating (D-01, D-02)
+        client_id     = os.getenv("SPOTIFY_CLIENT_ID", "").strip()
+        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET", "").strip()
+        if client_id and client_secret:
+            self._spotify_client  = SpotifyClient(client_id, client_secret)
+            self._spotify_enabled = True
+        else:
+            self._spotify_client  = None
+            self._spotify_enabled = False
+
+        # YouTube extractor — no credentials required (META-02)
+        self._yt_extractor = YoutubeExtractor()
+
         # Status bar
-        self.statusBar().showMessage("Ready — add songs to begin")
+        if self._spotify_enabled:
+            self.statusBar().showMessage("Ready — add songs to begin")
+        else:
+            self.statusBar().showMessage(
+                "Spotify credentials not found — Spotify rows will be skipped. "
+                "Add .env with SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET."
+            )
 
     def _process_urls(self, raw: str) -> None:
         lines = [line.strip() for line in raw.splitlines()]

@@ -94,6 +94,7 @@ def test_status_enum_values():
         "Uploading",
         "Done",
         "Failed",
+        "Metadata ready",  # added Phase 3 — META-01
     ]
     assert [s.value for s in SongStatus] == expected
 
