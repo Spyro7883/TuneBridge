@@ -61,7 +61,7 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 03-01-PLAN.md — SpotifyClient (token cache + track/album) + module-level imports + SongStatus.METADATA_READY + .env loading + credential gating
+- [x] 03-01-PLAN.md — SpotifyClient (token cache + track/album) + module-level imports + SongStatus.METADATA_READY + .env loading + credential gating
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 03-02-PLAN.md — YoutubeExtractor (yt-dlp info, no download) + D-08/D-09 title parser with (guessed) labels + _yt_extractor wiring
@@ -113,8 +113,8 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete | 2026-05-12 |
-| 2. Input & Detection | 0/2 | Not started | - |
-| 3. Metadata Services | 0/? | Not started | - |
+| 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
+| 3. Metadata Services | 1/4 | In Progress | - |
 | 4. Download Pipeline | 0/? | Not started | - |
 | 5. Organization | 0/? | Not started | - |
 | 6. iBroadcast Upload | 0/? | Not started | - |
