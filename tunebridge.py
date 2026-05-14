@@ -2,11 +2,18 @@
 """TuneBridge — Phase 2: Input & Detection (PySide6 Liquid Glass)."""
 from __future__ import annotations
 
+import base64
+import os
 import re
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
+
+import requests
+import yt_dlp
+from dotenv import load_dotenv
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QBrush, QColor
@@ -99,15 +106,16 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 
 
 class SongStatus(Enum):
-    QUEUED      = "Queued"
-    FETCHING    = "Fetching metadata"
-    DOWNLOADING = "Downloading"
-    RETUNING    = "Retuning"
-    AWAITING    = "Awaiting folder"
-    SAVING      = "Saving"
-    UPLOADING   = "Uploading"
-    DONE        = "Done"
-    FAILED      = "Failed"
+    QUEUED          = "Queued"
+    FETCHING        = "Fetching metadata"
+    DOWNLOADING     = "Downloading"
+    RETUNING        = "Retuning"
+    AWAITING        = "Awaiting folder"
+    SAVING          = "Saving"
+    UPLOADING       = "Uploading"
+    DONE            = "Done"
+    FAILED          = "Failed"
+    METADATA_READY  = "Metadata ready"
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +235,8 @@ class BatchTable(QWidget):
         "Done":              QColor("#1DB954"),
         "Failed":            QColor("#EF4444"),
         "Skipped — bad URL": QColor("#EF4444"),
+        "Metadata ready":    QColor("#1DB954"),
+        "Failed — metadata": QColor("#EF4444"),
     }
 
     _TYPE_COLORS: dict[str, QColor] = {
@@ -368,6 +378,7 @@ class TuneBridgeApp(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        load_dotenv()  # D-01: .env credentials loaded once at startup
         self.setWindowTitle("TuneBridge")
         self.setMinimumSize(800, 520)
         self.setStyleSheet(TUNEBRIDGE_QSS)
