@@ -67,7 +67,7 @@ Plans:
 - [x] 03-02-PLAN.md — YoutubeExtractor (yt-dlp info, no download) + D-08/D-09 title parser with (guessed) labels + _yt_extractor wiring
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 03-03-PLAN.md — fetch_metadata_for_row routing function + _SPOTIFY_RESOURCE_RE regex + _Dispatcher.metadata_ready Signal(int, object)
+- [x] 03-03-PLAN.md — fetch_metadata_for_row routing function + _SPOTIFY_RESOURCE_RE regex + _Dispatcher.metadata_ready Signal(int, object)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 03-04-PLAN.md — Full BatchTable.update_row_metadata (D-05/D-06/D-09) + persistent ThreadPoolExecutor + _metadata_worker + auto-fetch wiring (D-03) + closeEvent
@@ -114,7 +114,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete | 2026-05-12 |
 | 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
-| 3. Metadata Services | 2/4 | In Progress | - |
+| 3. Metadata Services | 3/4 | In Progress | - |
 | 4. Download Pipeline | 0/? | Not started | - |
 | 5. Organization | 0/? | Not started | - |
 | 6. iBroadcast Upload | 0/? | Not started | - |
