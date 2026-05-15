@@ -170,7 +170,13 @@ class ItunesClient:
 
     def get_metadata(self, spotify_url: str, resource_type: str) -> dict:
         """Return metadata dict for a Spotify URL (track or album)."""
-        resp = requests.get(spotify_url, headers=self._HEADERS, timeout=10)
+        # Strip locale prefix (e.g. /intl-es/, /en/) — Spotify returns 400 on locale URLs
+        m = _SPOTIFY_RESOURCE_RE.search(spotify_url)
+        url = (
+            f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
+            if m else spotify_url
+        )
+        resp = requests.get(url, headers=self._HEADERS, timeout=10)
         resp.raise_for_status()
         html = resp.text
 
