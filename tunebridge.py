@@ -122,7 +122,7 @@ class SongStatus(Enum):
 # URL classification
 # ---------------------------------------------------------------------------
 
-_SPOTIFY_RE = re.compile(r"open\.spotify\.com/(track|album|playlist|artist)/")
+_SPOTIFY_RE = re.compile(r"open\.spotify\.com/(?:[a-z]{2}/|intl-[a-z]+/)?(track|album|playlist|artist)/")
 _YOUTUBE_RE = re.compile(r"(youtube\.com/watch\?.*v=|youtu\.be/)")
 
 
@@ -664,13 +664,15 @@ class TuneBridgeApp(QMainWindow):
             url_type = classify_url(url)
             if url_type is not None:
                 row_id = self.table.add_row(url=url, url_type=url_type)
-                valid_count += 1
                 # D-02 + D-07: Spotify rows fail fast when credentials missing.
+                # Emitting "Failed — metadata" fires _on_row_failed synchronously,
+                # which updates stat cards directly — don't count in valid_count.
                 if url_type == "Spotify" and not self._spotify_enabled:
                     self._dispatcher.row_status_changed.emit(
                         row_id, "Failed — metadata"
                     )
                 else:
+                    valid_count += 1
                     # D-03 + D-04: transition to Fetching, submit worker.
                     self._dispatcher.row_status_changed.emit(
                         row_id, SongStatus.FETCHING.value
