@@ -157,51 +157,32 @@ class _Dispatcher(QObject):
 
 
 class ItunesClient:
-    """Fetch Spotify track/album metadata via oEmbed + iTunes Search API.
+    """Fetch Spotify track/album metadata via Spotify's public oEmbed endpoint.
 
-    No API key required. Uses Spotify's public oEmbed endpoint to resolve
-    artist + title, then queries the iTunes Search API for structured metadata.
+    No API key or credentials required. oEmbed returns author_name (artist)
+    and title (track/album name) for any public Spotify URL.
     """
 
     _OEMBED_URL = "https://open.spotify.com/oembed"
-    _ITUNES_URL = "https://itunes.apple.com/search"
 
     def get_metadata(self, spotify_url: str, resource_type: str) -> dict:
         """Return metadata dict for a Spotify URL (track or album)."""
-        oembed = self._fetch_oembed(spotify_url)
-        artist = oembed.get("author_name", "")
-        name   = oembed.get("title", "")
-        return self._search_itunes(artist, name, resource_type)
-
-    def _fetch_oembed(self, url: str) -> dict:
-        resp = requests.get(self._OEMBED_URL, params={"url": url}, timeout=10)
+        resp = requests.get(self._OEMBED_URL, params={"url": spotify_url}, timeout=10)
         resp.raise_for_status()
-        return resp.json()
-
-    def _search_itunes(self, artist: str, name: str, resource_type: str) -> dict:
-        entity = "album" if resource_type == "album" else "musicTrack"
-        query  = f"{artist} {name}".strip()
-        resp = requests.get(
-            self._ITUNES_URL,
-            params={"term": query, "media": "music", "entity": entity, "limit": 1},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-        if not results:
-            raise ValueError(f"No iTunes results for: {query!r}")
-        r = results[0]
+        data   = resp.json()
+        artist = data.get("author_name", "")
+        title  = data.get("title", "")
         if resource_type == "album":
             return {
-                "artist":       r.get("artistName", ""),
-                "track_title":  r.get("collectionName", ""),
-                "album":        r.get("collectionName", ""),
+                "artist":       artist,
+                "track_title":  title,
+                "album":        title,
                 "release_type": "album",
             }
         return {
-            "artist":       r.get("artistName", ""),
-            "track_title":  r.get("trackName", ""),
-            "album":        r.get("collectionName", ""),
+            "artist":       artist,
+            "track_title":  title,
+            "album":        "",
             "release_type": "single",
         }
 

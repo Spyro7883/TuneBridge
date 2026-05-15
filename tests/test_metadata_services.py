@@ -66,83 +66,47 @@ _YT_INFO = {
 def test_itunes_get_metadata_track_returns_required_keys():
     """get_metadata for a track must return artist, track_title, album, release_type."""
     client = ItunesClient()
-    with patch.object(client, "_fetch_oembed", return_value=_OEMBED_TRACK), \
-         patch.object(client, "_search_itunes", return_value={
-             "artist": "The Weeknd", "track_title": "Blinding Lights",
-             "album": "After Hours", "release_type": "single",
-         }):
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.json.return_value = _OEMBED_TRACK
         result = client.get_metadata("https://open.spotify.com/track/x", "track")
     for key in ("artist", "track_title", "album", "release_type"):
         assert key in result, f"Missing key: {key}"
 
 
-def test_itunes_get_metadata_passes_url_to_oembed():
-    """get_metadata must call _fetch_oembed with the original Spotify URL."""
-    client = ItunesClient()
-    url = "https://open.spotify.com/track/abc123"
-    with patch.object(client, "_fetch_oembed", return_value=_OEMBED_TRACK) as mock_oe, \
-         patch.object(client, "_search_itunes", return_value={
-             "artist": "A", "track_title": "T", "album": "B", "release_type": "single",
-         }):
-        client.get_metadata(url, "track")
-    mock_oe.assert_called_once_with(url)
-
-
-def test_itunes_get_metadata_passes_resource_type_to_search():
-    """get_metadata must forward resource_type to _search_itunes."""
-    client = ItunesClient()
-    with patch.object(client, "_fetch_oembed", return_value=_OEMBED_ALBUM), \
-         patch.object(client, "_search_itunes", return_value={
-             "artist": "A", "track_title": "B", "album": "B", "release_type": "album",
-         }) as mock_search:
-        client.get_metadata("https://open.spotify.com/album/x", "album")
-    _, _, resource_type_arg = mock_search.call_args[0]
-    assert resource_type_arg == "album"
-
-
-def test_itunes_search_track_values_correct():
-    """_search_itunes for a track must map iTunes fields correctly."""
+def test_itunes_get_metadata_track_values_correct():
+    """Track metadata values must come from oEmbed author_name and title."""
     client = ItunesClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
-        mock_get.return_value.json.return_value = {"results": [_ITUNES_TRACK_RESULT]}
-        result = client._search_itunes("The Weeknd", "Blinding Lights", "track")
+        mock_get.return_value.json.return_value = _OEMBED_TRACK
+        result = client.get_metadata("https://open.spotify.com/track/x", "track")
     assert result["artist"] == "The Weeknd"
     assert result["track_title"] == "Blinding Lights"
-    assert result["album"] == "After Hours"
     assert result["release_type"] == "single"
 
 
-def test_itunes_search_album_values_correct():
-    """_search_itunes for an album must map collectionName to track_title and album."""
+def test_itunes_get_metadata_album_values_correct():
+    """Album metadata must set release_type='album' and use title as both track_title and album."""
     client = ItunesClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
-        mock_get.return_value.json.return_value = {"results": [_ITUNES_ALBUM_RESULT]}
-        result = client._search_itunes("The Weeknd", "After Hours", "album")
+        mock_get.return_value.json.return_value = _OEMBED_ALBUM
+        result = client.get_metadata("https://open.spotify.com/album/x", "album")
     assert result["artist"] == "The Weeknd"
+    assert result["track_title"] == "After Hours"
     assert result["album"] == "After Hours"
     assert result["release_type"] == "album"
 
 
-def test_itunes_search_no_results_raises():
-    """Empty iTunes results must raise ValueError, not return empty dict."""
-    client = ItunesClient()
-    with patch("tunebridge.requests.get") as mock_get:
-        mock_get.return_value.raise_for_status = MagicMock()
-        mock_get.return_value.json.return_value = {"results": []}
-        with pytest.raises(ValueError):
-            client._search_itunes("Unknown", "Unknown", "track")
-
-
 def test_itunes_http_error_raises():
-    """HTTP error from iTunes or oEmbed must propagate as an exception."""
+    """HTTP error from oEmbed must propagate as an exception."""
     import requests as _req
     client = ItunesClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status.side_effect = _req.HTTPError("503")
         with pytest.raises(Exception):
-            client._fetch_oembed("https://open.spotify.com/track/x")
+            client.get_metadata("https://open.spotify.com/track/x", "track")
 
 
 # ---------------------------------------------------------------------------
