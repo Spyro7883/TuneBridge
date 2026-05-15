@@ -606,6 +606,9 @@ class TuneBridgeApp(QMainWindow):
         # Thread dispatcher
         self._dispatcher = _Dispatcher(self.table)
 
+        # Persistent thread pool — submissions from _process_urls (D-03 auto-fetch)
+        self._executor = ThreadPoolExecutor(max_workers=self._MAX_WORKERS)
+
         # Spotify credential gating (D-01, D-02)
         client_id     = os.getenv("SPOTIFY_CLIENT_ID", "").strip()
         client_secret = os.getenv("SPOTIFY_CLIENT_SECRET", "").strip()
@@ -639,8 +642,21 @@ class TuneBridgeApp(QMainWindow):
         for url in candidates:
             url_type = classify_url(url)
             if url_type is not None:
-                self.table.add_row(url=url, url_type=url_type)
+                row_id = self.table.add_row(url=url, url_type=url_type)
                 valid_count += 1
+                # D-02 + D-07: Spotify rows fail fast when credentials missing.
+                if url_type == "Spotify" and not self._spotify_enabled:
+                    self._dispatcher.row_status_changed.emit(
+                        row_id, "Failed — metadata"
+                    )
+                else:
+                    # D-03 + D-04: transition to Fetching, submit worker.
+                    self._dispatcher.row_status_changed.emit(
+                        row_id, SongStatus.FETCHING.value
+                    )
+                    self._executor.submit(
+                        self._metadata_worker, row_id, url, url_type
+                    )
             else:
                 self.table.add_row(url=url, url_type="Invalid URL")
                 invalid_count += 1
@@ -705,6 +721,28 @@ class TuneBridgeApp(QMainWindow):
         for status in statuses:
             self._dispatcher.row_status_changed.emit(row_id, status.value)
             time.sleep(0.1)
+
+    def _metadata_worker(self, row_id: int, url: str, url_type: str) -> None:
+        """Worker thread: fetch metadata for a row, emit result or failure (D-07).
+
+        Catches ALL exceptions — per-row error isolation. Other rows in the
+        batch are unaffected.
+        """
+        try:
+            metadata = fetch_metadata_for_row(
+                url            = url,
+                url_type       = url_type,
+                spotify_client = self._spotify_client,
+                yt_extractor   = self._yt_extractor,
+            )
+            self._dispatcher.metadata_ready.emit(row_id, metadata)
+        except Exception:
+            self._dispatcher.row_status_changed.emit(row_id, "Failed — metadata")
+
+    def closeEvent(self, event) -> None:
+        """Shutdown the persistent thread pool on window close."""
+        self._executor.shutdown(wait=False)
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":
