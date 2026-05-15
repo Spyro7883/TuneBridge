@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import re
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 
 import requests
@@ -122,7 +124,8 @@ class SongStatus(Enum):
 # URL classification
 # ---------------------------------------------------------------------------
 
-_SPOTIFY_RE = re.compile(r"open\.spotify\.com/(?:[a-z]{2}/|intl-[a-z]+/)?(track|album|playlist|artist)/")
+_LOCALE_PREFIX = r"(?:[a-z]{2}/)?(?:intl-[a-z]+/)?"
+_SPOTIFY_RE = re.compile(r"open\.spotify\.com/" + _LOCALE_PREFIX + r"(track|album|playlist|artist)/")
 _YOUTUBE_RE = re.compile(r"(youtube\.com/watch\?.*v=|youtu\.be/)")
 
 
@@ -264,7 +267,7 @@ class YoutubeExtractor:
 # Resource extractor for fetch_metadata_for_row. Handles locale prefixes:
 #   /track/{id}, /album/{id}, /en/track/{id}, /intl-ro/track/{id}, etc.
 _SPOTIFY_RESOURCE_RE = re.compile(
-    r"open\.spotify\.com/(?:[a-z]{2}/)?(?:intl-[a-z]+/)?(track|album)/([A-Za-z0-9]+)"
+    r"open\.spotify\.com/" + _LOCALE_PREFIX + r"(track|album)/([A-Za-z0-9]+)"
 )
 
 
@@ -280,8 +283,10 @@ def fetch_metadata_for_row(
     """
     if url_type == "Spotify":
         m = _SPOTIFY_RESOURCE_RE.search(url)
-        resource_type = m.group(1) if m else "track"
-        resource_id   = m.group(2) if m else url.split("/")[-1].split("?")[0]
+        if not m:
+            raise ValueError(f"Cannot parse Spotify resource from URL: {url!r}")
+        resource_type = m.group(1)
+        resource_id   = m.group(2)
         if resource_type == "album":
             metadata = spotify_client.get_album_metadata(resource_id)
         else:
@@ -415,9 +420,9 @@ class BatchTable(QWidget):
         self._rows: dict[int, str] = {}
 
         # Callbacks set by TuneBridgeApp to sync stat cards
-        self._on_clear: "callable | None" = None
-        self._on_rows_removed: "callable | None" = None
-        self._on_row_failed: "callable | None" = None
+        self._on_clear:        Callable[[], None] | None = None
+        self._on_rows_removed: Callable[[int, int], None] | None = None
+        self._on_row_failed:   Callable[[], None] | None = None
 
     def add_row(self, url: str, title: str = "", url_type: str = "") -> int:
         """Add a row and return its int row index."""
@@ -629,6 +634,7 @@ class TuneBridgeApp(QMainWindow):
 
         # Persistent thread pool — submissions from _process_urls (D-03 auto-fetch)
         self._executor = ThreadPoolExecutor(max_workers=self._MAX_WORKERS)
+        self._closing  = threading.Event()
 
         # Spotify credential gating (D-01, D-02)
         client_id     = os.getenv("SPOTIFY_CLIENT_ID", "").strip()
@@ -703,54 +709,14 @@ class TuneBridgeApp(QMainWindow):
         """Explicit clear — also triggered via table._on_clear."""
         self.table.clear()
 
-    def _start_demo(self) -> None:
-        """Demo worker — kept for Phase 1 backward-compat and test_worker_count_formula."""
-        DEMO_URLS = [
-            "https://open.spotify.com/track/demo1",
-            "https://open.spotify.com/track/demo2",
-            "https://open.spotify.com/track/demo3",
-            "https://open.spotify.com/track/demo4",
-            "https://open.spotify.com/track/demo5",
-        ]
-        row_ids = [self.table.add_row(url=u, url_type="Spotify") for u in DEMO_URLS]
-        max_workers = min(len(row_ids), self._MAX_WORKERS)
-
-        def run():
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {
-                    pool.submit(self._mock_worker, rid): rid for rid in row_ids
-                }
-                for future in as_completed(futures):
-                    try:
-                        future.result()
-                    except Exception:
-                        rid = futures[future]
-                        self._dispatcher.row_status_changed.emit(
-                            rid, SongStatus.FAILED.value
-                        )
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _mock_worker(self, row_id: int) -> None:
-        """Simulated worker — cycles statuses for demo."""
-        import time
-        statuses = [
-            SongStatus.FETCHING,
-            SongStatus.DOWNLOADING,
-            SongStatus.RETUNING,
-            SongStatus.SAVING,
-            SongStatus.DONE,
-        ]
-        for status in statuses:
-            self._dispatcher.row_status_changed.emit(row_id, status.value)
-            time.sleep(0.1)
-
     def _metadata_worker(self, row_id: int, url: str, url_type: str) -> None:
         """Worker thread: fetch metadata for a row, emit result or failure (D-07).
 
         Catches ALL exceptions — per-row error isolation. Other rows in the
         batch are unaffected.
         """
+        if self._closing.is_set():
+            return
         try:
             metadata = fetch_metadata_for_row(
                 url            = url,
@@ -758,12 +724,18 @@ class TuneBridgeApp(QMainWindow):
                 spotify_client = self._spotify_client,
                 yt_extractor   = self._yt_extractor,
             )
-            self._dispatcher.metadata_ready.emit(row_id, metadata)
-        except Exception:
-            self._dispatcher.row_status_changed.emit(row_id, "Failed — metadata")
+            if not self._closing.is_set():
+                self._dispatcher.metadata_ready.emit(row_id, metadata)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Metadata fetch failed for row %d (%s): %s", row_id, url, exc
+            )
+            if not self._closing.is_set():
+                self._dispatcher.row_status_changed.emit(row_id, "Failed — metadata")
 
     def closeEvent(self, event) -> None:
         """Shutdown the persistent thread pool on window close."""
+        self._closing.set()
         self._executor.shutdown(wait=False)
         super().closeEvent(event)
 

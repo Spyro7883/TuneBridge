@@ -267,8 +267,6 @@ def test_process_urls_status_bar_all_invalid(window):
 
 
 def test_worker_count_formula():
-    src = inspect.getsource(TuneBridgeApp._start_demo)
-    assert re.search(r"\bmin\b", src), "_start_demo must use min() for worker cap"
     cap = TuneBridgeApp._MAX_WORKERS
     assert cap == 4
     assert min(1, cap) == 1

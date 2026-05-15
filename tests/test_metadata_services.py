@@ -340,7 +340,7 @@ def test_batch_table_update_row_metadata_status_transitions_to_done(window):
     })
     status_item = window.table._table.item(row_id, 2)
     assert status_item is not None
-    assert status_item.text() in ("Metadata ready", "Fetching metadata", "Done")
+    assert status_item.text() == "Metadata ready"
 
 
 def test_batch_table_update_row_metadata_youtube_label_round_trip(window):
@@ -357,3 +357,5 @@ def test_batch_table_update_row_metadata_youtube_label_round_trip(window):
     })
     url_item = window.table._table.item(row_id, 0)
     assert url_item is not None
+    assert "Artist" in url_item.text()
+    assert "Song" in url_item.text()
