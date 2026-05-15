@@ -34,20 +34,15 @@ def window(qapp):
     w.deleteLater()
 
 
-# Canned API payloads
-_OEMBED_TRACK = {"author_name": "The Weeknd", "title": "Blinding Lights"}
-_OEMBED_ALBUM = {"author_name": "The Weeknd", "title": "After Hours"}
-
-_ITUNES_TRACK_RESULT = {
-    "artistName": "The Weeknd",
-    "trackName": "Blinding Lights",
-    "collectionName": "After Hours",
-}
-_ITUNES_ALBUM_RESULT = {
-    "artistName": "The Weeknd",
-    "collectionName": "After Hours",
-    "collectionType": "Album",
-}
+# Canned Spotify page HTML payloads (OG tag scraping)
+_SPOTIFY_TRACK_HTML = (
+    '<meta property="og:title" content="Blinding Lights">'
+    '<meta property="og:description" content="The Weeknd &middot; After Hours &middot; Song &middot; 2019">'
+)
+_SPOTIFY_ALBUM_HTML = (
+    '<meta property="og:title" content="After Hours">'
+    '<meta property="og:description" content="The Weeknd &middot; Album &middot; 2020">'
+)
 
 _YT_INFO = {
     "title": "The Weeknd - Blinding Lights (Official Video)",
@@ -59,7 +54,7 @@ _YT_INFO = {
 
 
 # ---------------------------------------------------------------------------
-# ItunesClient — oEmbed + iTunes Search
+# ItunesClient — Spotify page OG tag scraping
 # ---------------------------------------------------------------------------
 
 
@@ -68,18 +63,18 @@ def test_itunes_get_metadata_track_returns_required_keys():
     client = ItunesClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
-        mock_get.return_value.json.return_value = _OEMBED_TRACK
+        mock_get.return_value.text = _SPOTIFY_TRACK_HTML
         result = client.get_metadata("https://open.spotify.com/track/x", "track")
     for key in ("artist", "track_title", "album", "release_type"):
         assert key in result, f"Missing key: {key}"
 
 
 def test_itunes_get_metadata_track_values_correct():
-    """Track metadata values must come from oEmbed author_name and title."""
+    """Track metadata values must come from og:title and og:description."""
     client = ItunesClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
-        mock_get.return_value.json.return_value = _OEMBED_TRACK
+        mock_get.return_value.text = _SPOTIFY_TRACK_HTML
         result = client.get_metadata("https://open.spotify.com/track/x", "track")
     assert result["artist"] == "The Weeknd"
     assert result["track_title"] == "Blinding Lights"
@@ -87,11 +82,11 @@ def test_itunes_get_metadata_track_values_correct():
 
 
 def test_itunes_get_metadata_album_values_correct():
-    """Album metadata must set release_type='album' and use title as both track_title and album."""
+    """Album metadata must set release_type='album' and use og:title as both track_title and album."""
     client = ItunesClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
-        mock_get.return_value.json.return_value = _OEMBED_ALBUM
+        mock_get.return_value.text = _SPOTIFY_ALBUM_HTML
         result = client.get_metadata("https://open.spotify.com/album/x", "album")
     assert result["artist"] == "The Weeknd"
     assert result["track_title"] == "After Hours"
@@ -276,9 +271,9 @@ def test_batch_table_update_row_metadata_stores_title(window):
     )
     window.table.update_row_metadata(row_id, {
         "artist": "The Weeknd",
-        "title": "Blinding Lights",
-        "album": "After Hours",
-        "release_type": "album",
+        "track_title": "Blinding Lights",
+        "album": "",
+        "release_type": "single",
         "source": "Spotify",
     })
     url_item = window.table._table.item(row_id, 0)

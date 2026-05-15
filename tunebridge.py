@@ -10,6 +10,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 
+import html as _html
 import requests
 import yt_dlp
 
@@ -157,21 +158,31 @@ class _Dispatcher(QObject):
 
 
 class ItunesClient:
-    """Fetch Spotify track/album metadata via Spotify's public oEmbed endpoint.
+    """Fetch Spotify track/album metadata via Spotify's public page OG tags.
 
-    No API key or credentials required. oEmbed returns author_name (artist)
-    and title (track/album name) for any public Spotify URL.
+    No API key or credentials required. og:title gives the track/album name;
+    og:description gives "Artist · Album · Type · Year" for tracks.
     """
 
-    _OEMBED_URL = "https://open.spotify.com/oembed"
+    _OG_TITLE_RE = re.compile(r'<meta property="og:title" content="([^"]+)"')
+    _OG_DESC_RE  = re.compile(r'<meta property="og:description" content="([^"]+)"')
+    _HEADERS     = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
     def get_metadata(self, spotify_url: str, resource_type: str) -> dict:
         """Return metadata dict for a Spotify URL (track or album)."""
-        resp = requests.get(self._OEMBED_URL, params={"url": spotify_url}, timeout=10)
+        resp = requests.get(spotify_url, headers=self._HEADERS, timeout=10)
         resp.raise_for_status()
-        data   = resp.json()
-        artist = data.get("author_name", "")
-        title  = data.get("title", "")
+        html = resp.text
+
+        m_title = self._OG_TITLE_RE.search(html)
+        m_desc  = self._OG_DESC_RE.search(html)
+
+        title  = _html.unescape(m_title.group(1)) if m_title else ""
+        artist = ""
+        if m_desc:
+            parts  = _html.unescape(m_desc.group(1)).split(" · ")
+            artist = parts[0] if parts else ""
+
         if resource_type == "album":
             return {
                 "artist":       artist,
@@ -437,13 +448,10 @@ class BatchTable(QWidget):
         source = metadata.get("source", "")
         if source == "Spotify":
             artist = metadata.get("artist", "")
-            # Distinguish album URLs (no "title" key) from track URLs (has "title" key).
-            # release_type reflects the album type of the containing album for tracks —
-            # do NOT use it to choose display format. Presence of "title" means it's a track.
-            if "title" in metadata:
-                label = f"{artist} — {metadata.get('title', '')}"
-            else:
+            if metadata.get("release_type") == "album":
                 label = f"{artist} — {metadata.get('album', '')} [album]"
+            else:
+                label = f"{artist} — {metadata.get('track_title', '')}"
         else:  # YouTube
             artist = metadata.get("artist", "")
             track  = metadata.get("track_title", metadata.get("title", ""))
