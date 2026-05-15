@@ -10,7 +10,7 @@
 
 - [x] **Phase 1: Foundation** — Dark GUI shell, batch table scaffold, threaded pipeline infrastructure, status state machine
 - [x] **Phase 2: Input & Detection** — Paste area, URL type classification, type badges, inline per-row error display
-- [ ] **Phase 3: Metadata Services** — Spotify Web API client, yt-dlp info extraction, "(guessed)" label convention
+- [x] **Phase 3: Metadata Services** — Spotify Web API client, yt-dlp info extraction, "(guessed)" label convention
 - [ ] **Phase 4: Download Pipeline** — Dual-path download (ytsearch vs direct), 432Hz retune toggle, audio-only MP3 output
 - [ ] **Phase 5: Organization** — Folder proposal logic, per-song folder confirmation dialog with threading.Event safety, skip support, file save
 - [ ] **Phase 6: iBroadcast Upload** — Auth, duplicate check, upload to iBroadcast after file save
@@ -70,7 +70,7 @@ Plans:
 - [x] 03-03-PLAN.md — fetch_metadata_for_row routing function + _SPOTIFY_RESOURCE_RE regex + _Dispatcher.metadata_ready Signal(int, object)
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 03-04-PLAN.md — Full BatchTable.update_row_metadata (D-05/D-06/D-09) + persistent ThreadPoolExecutor + _metadata_worker + auto-fetch wiring (D-03) + closeEvent
+- [x] 03-04-PLAN.md — Full BatchTable.update_row_metadata (D-05/D-06/D-09) + persistent ThreadPoolExecutor + _metadata_worker + auto-fetch wiring (D-03) + closeEvent
 
 ### Phase 4: Download Pipeline
 **Goal**: Every song in the batch downloads as an audio-only MP3, with optional 432Hz retune applied, using the correct path for its URL type
@@ -114,11 +114,11 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete | 2026-05-12 |
 | 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
-| 3. Metadata Services | 3/4 | In Progress | - |
+| 3. Metadata Services | 4/4 | Complete | 2026-05-15 |
 | 4. Download Pipeline | 0/? | Not started | - |
 | 5. Organization | 0/? | Not started | - |
 | 6. iBroadcast Upload | 0/? | Not started | - |
 
 ---
 
-*Last updated: 2026-05-13*
+*Last updated: 2026-05-15*
