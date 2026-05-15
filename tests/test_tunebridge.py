@@ -58,6 +58,11 @@ def test_classify_spotify_artist():
     assert classify_url("https://open.spotify.com/artist/ar123") == "Spotify"
 
 
+def test_classify_spotify_intl_locale():
+    assert classify_url("https://open.spotify.com/intl-es/track/0RrwwLDXmvCGXXzuDgwvO") == "Spotify"
+    assert classify_url("https://open.spotify.com/intl-ro/album/abc123") == "Spotify"
+
+
 def test_classify_youtube_watch():
     assert classify_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "YouTube"
 
@@ -192,8 +197,7 @@ def test_batch_table_clear_empties_rows(window):
 
 
 def test_batch_table_clear_resets_stat_cards(window):
-    # Simulate paste to increment cards
-    window._process_urls("https://open.spotify.com/track/a\nhttps://open.spotify.com/track/b")
+    window._process_urls("https://www.youtube.com/watch?v=a\nhttps://www.youtube.com/watch?v=b")
     assert window._card_valid.count() > 0
     window.table.clear()
     assert window._card_valid.count() == 0
@@ -234,7 +238,7 @@ def test_batch_table_invalid_url_row(window):
 def test_process_urls_increments_valid_card(window):
     before = window._card_valid.count()
     window._process_urls(
-        "https://open.spotify.com/track/x\nhttps://www.youtube.com/watch?v=abc"
+        "https://www.youtube.com/watch?v=abc\nhttps://www.youtube.com/watch?v=xyz"
     )
     assert window._card_valid.count() == before + 2
 
@@ -246,7 +250,7 @@ def test_process_urls_increments_invalid_card(window):
 
 
 def test_process_urls_status_bar_valid(window):
-    window._process_urls("https://open.spotify.com/track/x")
+    window._process_urls("https://www.youtube.com/watch?v=abc")
     msg = window.statusBar().currentMessage()
     assert "added" in msg and "ready" in msg
 
