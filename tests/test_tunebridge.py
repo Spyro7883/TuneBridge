@@ -200,6 +200,24 @@ def test_batch_table_clear_resets_stat_cards(window):
     assert window._card_invalid.count() == 0
 
 
+def test_remove_selected_rows_decrements_valid_stat_card(window):
+    row_id = window.table.add_row(url="https://open.spotify.com/track/a", url_type="Spotify")
+    window._card_valid.set_count(window._card_valid.count() + 1)
+    before = window._card_valid.count()
+    window.table._table.selectRow(row_id)
+    window.table.remove_selected_rows()
+    assert window._card_valid.count() == before - 1
+
+
+def test_remove_selected_rows_decrements_invalid_stat_card(window):
+    row_id = window.table.add_row(url="https://www.youtube.com/watch?v=bad", url_type="YouTube")
+    window.table.update_row_status(row_id, "Failed — metadata")
+    before = window._card_invalid.count()
+    window.table._table.selectRow(row_id)
+    window.table.remove_selected_rows()
+    assert window._card_invalid.count() == before - 1
+
+
 def test_batch_table_invalid_url_row(window):
     row_id = window.table.add_row(url="https://bad.example.com", url_type="Invalid URL")
     type_item = window.table._table.item(row_id, 1)

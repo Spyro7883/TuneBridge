@@ -250,11 +250,10 @@ class YoutubeExtractor:
         raw_title = info.get("title", "")
         if " - " in raw_title:
             artist_part, track_part = raw_title.split(" - ", 1)
-            result["artist"]      = f"{artist_part} (guessed)"
-            result["track_title"] = f"{track_part} (guessed)"
+            result["artist"]      = artist_part
+            result["track_title"] = track_part
         else:
-            # D-09: no separator — no artist field; raw title shown as guessed display
-            result["track_title"] = f"{raw_title} (guessed)"
+            result["track_title"] = raw_title
         return result
 
 
@@ -415,8 +414,10 @@ class BatchTable(QWidget):
 
         self._rows: dict[int, str] = {}
 
-        # Callback set by TuneBridgeApp to reset stat cards on clear
+        # Callbacks set by TuneBridgeApp to sync stat cards
         self._on_clear: "callable | None" = None
+        self._on_rows_removed: "callable | None" = None
+        self._on_row_failed: "callable | None" = None
 
     def add_row(self, url: str, title: str = "", url_type: str = "") -> int:
         """Add a row and return its int row index."""
@@ -459,6 +460,8 @@ class BatchTable(QWidget):
         if item2:
             item2.setText(status)
             item2.setForeground(QBrush(color))
+        if status == "Failed — metadata" and self._on_row_failed:
+            self._on_row_failed()
 
     def update_row_metadata(self, row_id: int, metadata: dict) -> None:
         """Write human-readable display label to col 0, update status to 'Metadata ready'.
@@ -483,7 +486,7 @@ class BatchTable(QWidget):
             if artist:
                 label = f"{artist} — {track}"
             else:
-                label = f"(guessed) — {track}"
+                label = track
 
         color = self._STATUS_COLORS.get("Metadata ready", QColor("#1DB954"))
         item0 = self._table.item(row_id, 0)
@@ -499,6 +502,12 @@ class BatchTable(QWidget):
             {idx.row() for idx in self._table.selectedIndexes()},
             reverse=True,
         )
+        _INVALID_STATUSES = {"Skipped — bad URL", "Failed — metadata"}
+        invalid_removed = sum(
+            1 for r in rows
+            if (item := self._table.item(r, 2)) and item.text() in _INVALID_STATUSES
+        )
+        valid_removed = len(rows) - invalid_removed
         for row in rows:
             self._table.removeRow(row)
         self._rows = {
@@ -507,6 +516,8 @@ class BatchTable(QWidget):
                 self._rows[r] for r in sorted(self._rows) if r not in rows
             )
         }
+        if self._on_rows_removed:
+            self._on_rows_removed(valid_removed, invalid_removed)
         return len(rows)
 
     def _handle_key(self, event) -> None:
@@ -600,6 +611,16 @@ class TuneBridgeApp(QMainWindow):
         self.table._on_clear = lambda: (
             self._card_valid.set_count(0),
             self._card_invalid.set_count(0),
+        )
+        # Wire row deletion to decrement stat cards
+        self.table._on_rows_removed = lambda v, i: (
+            self._card_valid.set_count(max(0, self._card_valid.count() - v)),
+            self._card_invalid.set_count(max(0, self._card_invalid.count() - i)),
+        )
+        # Wire metadata failure to move row from valid → invalid
+        self.table._on_row_failed = lambda: (
+            self._card_valid.set_count(max(0, self._card_valid.count() - 1)),
+            self._card_invalid.set_count(self._card_invalid.count() + 1),
         )
         layout.addWidget(self.table)
 

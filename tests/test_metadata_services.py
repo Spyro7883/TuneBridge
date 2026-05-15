@@ -188,26 +188,26 @@ def test_youtube_extract_does_not_download():
     assert download_flag is False
 
 
-def test_youtube_guessed_artist_carries_label():
-    """Artist parsed from title must contain '(guessed)' — never unlabeled."""
+def test_youtube_artist_parsed_from_title():
+    """Artist parsed from 'Artist - Title' video title must be set without any suffix."""
     extractor = YoutubeExtractor()
     with patch("tunebridge.yt_dlp.YoutubeDL") as MockYDL:
         inst = MockYDL.return_value.__enter__.return_value
         inst.extract_info.return_value = _YT_INFO
         result = extractor.extract_metadata("https://www.youtube.com/watch?v=4NRXx6U8ABQ")
     if result.get("artist"):
-        assert "(guessed)" in result["artist"]
+        assert "(guessed)" not in result["artist"]
 
 
-def test_youtube_guessed_track_title_carries_label():
-    """Track title parsed from video title must contain '(guessed)'."""
+def test_youtube_track_title_parsed_from_title():
+    """Track title parsed from video title must be set without any suffix."""
     extractor = YoutubeExtractor()
     with patch("tunebridge.yt_dlp.YoutubeDL") as MockYDL:
         inst = MockYDL.return_value.__enter__.return_value
         inst.extract_info.return_value = _YT_INFO
         result = extractor.extract_metadata("https://www.youtube.com/watch?v=4NRXx6U8ABQ")
     if result.get("track_title"):
-        assert "(guessed)" in result["track_title"]
+        assert "(guessed)" not in result["track_title"]
 
 
 def test_youtube_extract_error_raises():
@@ -248,7 +248,7 @@ def test_fetch_metadata_routes_youtube_url_to_yt_extractor():
     mock_yt = MagicMock()
     mock_yt.extract_metadata.return_value = {
         "title": "T", "channel": "C",
-        "artist": "A (guessed)", "track_title": "T (guessed)",
+        "artist": "A", "track_title": "T",
     }
     fetch_metadata_for_row(
         url="https://www.youtube.com/watch?v=xyz",
@@ -280,7 +280,7 @@ def test_fetch_metadata_result_includes_source_youtube():
     mock_yt = MagicMock()
     mock_yt.extract_metadata.return_value = {
         "title": "T", "channel": "C",
-        "artist": "A (guessed)", "track_title": "T (guessed)",
+        "artist": "A", "track_title": "T",
     }
     result = fetch_metadata_for_row(
         url="https://www.youtube.com/watch?v=abc",
@@ -343,16 +343,16 @@ def test_batch_table_update_row_metadata_status_transitions_to_done(window):
     assert status_item.text() in ("Metadata ready", "Fetching metadata", "Done")
 
 
-def test_batch_table_update_row_metadata_guessed_label_preserved(window):
-    """'(guessed)' suffix in a YouTube field must survive the round-trip into the table."""
+def test_batch_table_update_row_metadata_youtube_label_round_trip(window):
+    """YouTube artist/track fields must survive the round-trip into the table."""
     row_id = window.table.add_row(
         url="https://www.youtube.com/watch?v=abc", url_type="YouTube"
     )
     window.table.update_row_metadata(row_id, {
         "title": "Artist - Song (Official Video)",
         "channel": "ArtistVEVO",
-        "artist": "Artist (guessed)",
-        "track_title": "Song (guessed)",
+        "artist": "Artist",
+        "track_title": "Song",
         "source": "YouTube",
     })
     url_item = window.table._table.item(row_id, 0)
