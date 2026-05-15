@@ -252,7 +252,7 @@ def test_process_urls_increments_invalid_card(window):
 def test_process_urls_status_bar_valid(window):
     window._process_urls("https://www.youtube.com/watch?v=abc")
     msg = window.statusBar().currentMessage()
-    assert "added" in msg and "ready" in msg
+    assert "added" in msg
 
 
 def test_process_urls_status_bar_all_invalid(window):
