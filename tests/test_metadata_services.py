@@ -9,7 +9,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from tunebridge import (
-    SpotifyClient,
+    ItunesClient,
     TuneBridgeApp,
     YoutubeExtractor,
     fetch_metadata_for_row,
@@ -35,21 +35,18 @@ def window(qapp):
 
 
 # Canned API payloads
-_TOKEN_RESP = {"access_token": "tok-xyz", "token_type": "Bearer", "expires_in": 3600}
+_OEMBED_TRACK = {"author_name": "The Weeknd", "title": "Blinding Lights"}
+_OEMBED_ALBUM = {"author_name": "The Weeknd", "title": "After Hours"}
 
-_TRACK_RESP = {
-    "name": "Blinding Lights",
-    "artists": [{"name": "The Weeknd"}],
-    "album": {"name": "After Hours", "album_type": "album", "release_date": "2020-03-20"},
-    "duration_ms": 200040,
+_ITUNES_TRACK_RESULT = {
+    "artistName": "The Weeknd",
+    "trackName": "Blinding Lights",
+    "collectionName": "After Hours",
 }
-
-_ALBUM_RESP = {
-    "name": "After Hours",
-    "artists": [{"name": "The Weeknd"}],
-    "album_type": "album",
-    "release_date": "2020-03-20",
-    "tracks": {"total": 14},
+_ITUNES_ALBUM_RESULT = {
+    "artistName": "The Weeknd",
+    "collectionName": "After Hours",
+    "collectionType": "Album",
 }
 
 _YT_INFO = {
@@ -62,94 +59,90 @@ _YT_INFO = {
 
 
 # ---------------------------------------------------------------------------
-# SpotifyClient — token management
+# ItunesClient — oEmbed + iTunes Search
 # ---------------------------------------------------------------------------
 
 
-def test_spotify_token_uses_client_credentials_grant():
-    """_get_token must POST with grant_type=client_credentials (no user login)."""
-    client = SpotifyClient(client_id="fake_id", client_secret="fake_secret")
-    with patch("tunebridge.requests.post") as mock_post:
-        mock_post.return_value.json.return_value = _TOKEN_RESP
-        mock_post.return_value.raise_for_status = MagicMock()
-        client._get_token()
-    data = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
-    assert data.get("grant_type") == "client_credentials"
-
-
-def test_spotify_token_cached_second_call_no_extra_post():
-    """Second _get_token() within TTL must reuse cached token — no extra POST."""
-    client = SpotifyClient(client_id="fake_id", client_secret="fake_secret")
-    with patch("tunebridge.requests.post") as mock_post:
-        mock_post.return_value.json.return_value = _TOKEN_RESP
-        mock_post.return_value.raise_for_status = MagicMock()
-        client._get_token()
-        client._get_token()
-    assert mock_post.call_count == 1
-
-
-def test_spotify_token_http_error_raises():
-    """HTTP 401 from token endpoint must propagate as an exception."""
-    import requests as _req
-    client = SpotifyClient(client_id="bad", client_secret="bad")
-    with patch("tunebridge.requests.post") as mock_post:
-        mock_post.return_value.raise_for_status.side_effect = _req.HTTPError("401")
-        with pytest.raises(Exception):
-            client._get_token()
-
-
-# ---------------------------------------------------------------------------
-# SpotifyClient — track / album metadata
-# ---------------------------------------------------------------------------
-
-
-def test_spotify_get_track_metadata_returns_required_keys():
-    """get_track_metadata must return artist, title, album, release_type."""
-    client = SpotifyClient(client_id="fake_id", client_secret="fake_secret")
-    with patch.object(client, "_get_token", return_value="tok"), \
-         patch("tunebridge.requests.get") as mock_get:
-        mock_get.return_value.json.return_value = _TRACK_RESP
-        mock_get.return_value.raise_for_status = MagicMock()
-        result = client.get_track_metadata("2374M0fkVJiOF9EtE81NuG")
-    for key in ("artist", "title", "album", "release_type"):
+def test_itunes_get_metadata_track_returns_required_keys():
+    """get_metadata for a track must return artist, track_title, album, release_type."""
+    client = ItunesClient()
+    with patch.object(client, "_fetch_oembed", return_value=_OEMBED_TRACK), \
+         patch.object(client, "_search_itunes", return_value={
+             "artist": "The Weeknd", "track_title": "Blinding Lights",
+             "album": "After Hours", "release_type": "single",
+         }):
+        result = client.get_metadata("https://open.spotify.com/track/x", "track")
+    for key in ("artist", "track_title", "album", "release_type"):
         assert key in result, f"Missing key: {key}"
 
 
-def test_spotify_get_track_metadata_values_correct():
-    """Track metadata values must match the Spotify API response."""
-    client = SpotifyClient(client_id="fake_id", client_secret="fake_secret")
-    with patch.object(client, "_get_token", return_value="tok"), \
-         patch("tunebridge.requests.get") as mock_get:
-        mock_get.return_value.json.return_value = _TRACK_RESP
+def test_itunes_get_metadata_passes_url_to_oembed():
+    """get_metadata must call _fetch_oembed with the original Spotify URL."""
+    client = ItunesClient()
+    url = "https://open.spotify.com/track/abc123"
+    with patch.object(client, "_fetch_oembed", return_value=_OEMBED_TRACK) as mock_oe, \
+         patch.object(client, "_search_itunes", return_value={
+             "artist": "A", "track_title": "T", "album": "B", "release_type": "single",
+         }):
+        client.get_metadata(url, "track")
+    mock_oe.assert_called_once_with(url)
+
+
+def test_itunes_get_metadata_passes_resource_type_to_search():
+    """get_metadata must forward resource_type to _search_itunes."""
+    client = ItunesClient()
+    with patch.object(client, "_fetch_oembed", return_value=_OEMBED_ALBUM), \
+         patch.object(client, "_search_itunes", return_value={
+             "artist": "A", "track_title": "B", "album": "B", "release_type": "album",
+         }) as mock_search:
+        client.get_metadata("https://open.spotify.com/album/x", "album")
+    _, _, resource_type_arg = mock_search.call_args[0]
+    assert resource_type_arg == "album"
+
+
+def test_itunes_search_track_values_correct():
+    """_search_itunes for a track must map iTunes fields correctly."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
-        result = client.get_track_metadata("2374M0fkVJiOF9EtE81NuG")
+        mock_get.return_value.json.return_value = {"results": [_ITUNES_TRACK_RESULT]}
+        result = client._search_itunes("The Weeknd", "Blinding Lights", "track")
     assert result["artist"] == "The Weeknd"
-    assert result["title"] == "Blinding Lights"
+    assert result["track_title"] == "Blinding Lights"
+    assert result["album"] == "After Hours"
+    assert result["release_type"] == "single"
+
+
+def test_itunes_search_album_values_correct():
+    """_search_itunes for an album must map collectionName to track_title and album."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.json.return_value = {"results": [_ITUNES_ALBUM_RESULT]}
+        result = client._search_itunes("The Weeknd", "After Hours", "album")
+    assert result["artist"] == "The Weeknd"
     assert result["album"] == "After Hours"
     assert result["release_type"] == "album"
 
 
-def test_spotify_get_album_metadata_returns_required_keys():
-    """get_album_metadata must return at least artist, album, release_type."""
-    client = SpotifyClient(client_id="fake_id", client_secret="fake_secret")
-    with patch.object(client, "_get_token", return_value="tok"), \
-         patch("tunebridge.requests.get") as mock_get:
-        mock_get.return_value.json.return_value = _ALBUM_RESP
+def test_itunes_search_no_results_raises():
+    """Empty iTunes results must raise ValueError, not return empty dict."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
-        result = client.get_album_metadata("4yP0hdKOZPNshxUOjY0cZj")
-    for key in ("artist", "album", "release_type"):
-        assert key in result, f"Missing key: {key}"
+        mock_get.return_value.json.return_value = {"results": []}
+        with pytest.raises(ValueError):
+            client._search_itunes("Unknown", "Unknown", "track")
 
 
-def test_spotify_get_track_metadata_http_error_raises():
-    """HTTP error on track fetch must raise, not return empty dict."""
+def test_itunes_http_error_raises():
+    """HTTP error from iTunes or oEmbed must propagate as an exception."""
     import requests as _req
-    client = SpotifyClient(client_id="fake_id", client_secret="fake_secret")
-    with patch.object(client, "_get_token", return_value="tok"), \
-         patch("tunebridge.requests.get") as mock_get:
-        mock_get.return_value.raise_for_status.side_effect = _req.HTTPError("404")
+    client = ItunesClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status.side_effect = _req.HTTPError("503")
         with pytest.raises(Exception):
-            client.get_track_metadata("nonexistent")
+            client._fetch_oembed("https://open.spotify.com/track/x")
 
 
 # ---------------------------------------------------------------------------
@@ -225,26 +218,26 @@ def test_youtube_extract_error_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_metadata_routes_spotify_url_to_spotify_client():
-    """Spotify URL must call SpotifyClient, never YoutubeExtractor."""
-    mock_sp = MagicMock()
-    mock_sp.get_track_metadata.return_value = {
-        "artist": "A", "title": "T", "album": "B", "release_type": "single",
+def test_fetch_metadata_routes_spotify_url_to_itunes_client():
+    """Spotify URL must call ItunesClient, never YoutubeExtractor."""
+    mock_it = MagicMock()
+    mock_it.get_metadata.return_value = {
+        "artist": "A", "track_title": "T", "album": "B", "release_type": "single",
     }
     mock_yt = MagicMock()
     fetch_metadata_for_row(
         url="https://open.spotify.com/track/abc123",
         url_type="Spotify",
-        spotify_client=mock_sp,
+        itunes_client=mock_it,
         yt_extractor=mock_yt,
     )
-    mock_sp.get_track_metadata.assert_called_once()
+    mock_it.get_metadata.assert_called_once()
     mock_yt.extract_metadata.assert_not_called()
 
 
 def test_fetch_metadata_routes_youtube_url_to_yt_extractor():
-    """YouTube URL must call YoutubeExtractor, never SpotifyClient."""
-    mock_sp = MagicMock()
+    """YouTube URL must call YoutubeExtractor, never ItunesClient."""
+    mock_it = MagicMock()
     mock_yt = MagicMock()
     mock_yt.extract_metadata.return_value = {
         "title": "T", "channel": "C",
@@ -253,23 +246,23 @@ def test_fetch_metadata_routes_youtube_url_to_yt_extractor():
     fetch_metadata_for_row(
         url="https://www.youtube.com/watch?v=xyz",
         url_type="YouTube",
-        spotify_client=mock_sp,
+        itunes_client=mock_it,
         yt_extractor=mock_yt,
     )
     mock_yt.extract_metadata.assert_called_once()
-    mock_sp.get_track_metadata.assert_not_called()
+    mock_it.get_metadata.assert_not_called()
 
 
 def test_fetch_metadata_result_includes_source_spotify():
     """Result dict must have source='Spotify' for Spotify rows."""
-    mock_sp = MagicMock()
-    mock_sp.get_track_metadata.return_value = {
-        "artist": "A", "title": "T", "album": "B", "release_type": "album",
+    mock_it = MagicMock()
+    mock_it.get_metadata.return_value = {
+        "artist": "A", "track_title": "T", "album": "B", "release_type": "album",
     }
     result = fetch_metadata_for_row(
         url="https://open.spotify.com/track/x",
         url_type="Spotify",
-        spotify_client=mock_sp,
+        itunes_client=mock_it,
         yt_extractor=MagicMock(),
     )
     assert result.get("source") == "Spotify"
@@ -285,26 +278,26 @@ def test_fetch_metadata_result_includes_source_youtube():
     result = fetch_metadata_for_row(
         url="https://www.youtube.com/watch?v=abc",
         url_type="YouTube",
-        spotify_client=MagicMock(),
+        itunes_client=MagicMock(),
         yt_extractor=mock_yt,
     )
     assert result.get("source") == "YouTube"
 
 
-def test_fetch_metadata_spotify_album_url_delegates_to_get_album_metadata():
-    """Spotify album URL must call get_album_metadata, not get_track_metadata."""
-    mock_sp = MagicMock()
-    mock_sp.get_album_metadata.return_value = {
-        "artist": "A", "album": "B", "release_type": "album",
+def test_fetch_metadata_spotify_album_url_passes_album_resource_type():
+    """Spotify album URL must call get_metadata with resource_type='album'."""
+    mock_it = MagicMock()
+    mock_it.get_metadata.return_value = {
+        "artist": "A", "track_title": "B", "album": "B", "release_type": "album",
     }
     fetch_metadata_for_row(
         url="https://open.spotify.com/album/xyz789",
         url_type="Spotify",
-        spotify_client=mock_sp,
+        itunes_client=mock_it,
         yt_extractor=MagicMock(),
     )
-    mock_sp.get_album_metadata.assert_called_once()
-    mock_sp.get_track_metadata.assert_not_called()
+    _, resource_type_arg = mock_it.get_metadata.call_args[0]
+    assert resource_type_arg == "album"
 
 
 # ---------------------------------------------------------------------------

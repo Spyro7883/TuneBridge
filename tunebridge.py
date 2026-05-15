@@ -2,20 +2,16 @@
 """TuneBridge — Phase 2: Input & Detection (PySide6 Liquid Glass)."""
 from __future__ import annotations
 
-import base64
 import logging
-import os
 import re
 import sys
 import threading
-import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 
 import requests
 import yt_dlp
-from dotenv import load_dotenv
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QBrush, QColor
@@ -156,71 +152,57 @@ class _Dispatcher(QObject):
 
 
 # ---------------------------------------------------------------------------
-# Spotify Web API client (client credentials flow, token cached per TTL)
+# iTunes metadata client (Spotify oEmbed + iTunes Search API — no credentials)
 # ---------------------------------------------------------------------------
 
 
-class SpotifyClient:
-    """Spotify Web API client using OAuth2 client credentials flow.
+class ItunesClient:
+    """Fetch Spotify track/album metadata via oEmbed + iTunes Search API.
 
-    Token is cached in-memory until `expires_in - TTL_BUFFER` seconds elapse.
-    No user login — read-only metadata access (META-01).
+    No API key required. Uses Spotify's public oEmbed endpoint to resolve
+    artist + title, then queries the iTunes Search API for structured metadata.
     """
 
-    TOKEN_URL  = "https://accounts.spotify.com/api/token"
-    API_BASE   = "https://api.spotify.com/v1"
-    TTL_BUFFER = 60  # seconds before nominal expiry to refresh
+    _OEMBED_URL = "https://open.spotify.com/oembed"
+    _ITUNES_URL = "https://itunes.apple.com/search"
 
-    def __init__(self, client_id: str, client_secret: str):
-        self._client_id     = client_id
-        self._client_secret = client_secret
-        self._token:        str | None = None
-        self._token_expiry: float      = 0.0
+    def get_metadata(self, spotify_url: str, resource_type: str) -> dict:
+        """Return metadata dict for a Spotify URL (track or album)."""
+        oembed = self._fetch_oembed(spotify_url)
+        artist = oembed.get("author_name", "")
+        name   = oembed.get("title", "")
+        return self._search_itunes(artist, name, resource_type)
 
-    def _get_token(self) -> str:
-        if self._token and time.time() < self._token_expiry:
-            return self._token
-        credentials = base64.b64encode(
-            f"{self._client_id}:{self._client_secret}".encode()
-        ).decode()
-        resp = requests.post(
-            self.TOKEN_URL,
-            headers={"Authorization": f"Basic {credentials}"},
-            data={"grant_type": "client_credentials"},
-        )
+    def _fetch_oembed(self, url: str) -> dict:
+        resp = requests.get(self._OEMBED_URL, params={"url": url}, timeout=10)
         resp.raise_for_status()
-        payload = resp.json()
-        self._token        = payload["access_token"]
-        self._token_expiry = time.time() + payload["expires_in"] - self.TTL_BUFFER
-        return self._token
+        return resp.json()
 
-    def get_track_metadata(self, track_id: str) -> dict:
-        token = self._get_token()
+    def _search_itunes(self, artist: str, name: str, resource_type: str) -> dict:
+        entity = "album" if resource_type == "album" else "musicTrack"
+        query  = f"{artist} {name}".strip()
         resp = requests.get(
-            f"{self.API_BASE}/tracks/{track_id}",
-            headers={"Authorization": f"Bearer {token}"},
+            self._ITUNES_URL,
+            params={"term": query, "media": "music", "entity": entity, "limit": 1},
+            timeout=10,
         )
         resp.raise_for_status()
-        data = resp.json()
+        results = resp.json().get("results", [])
+        if not results:
+            raise ValueError(f"No iTunes results for: {query!r}")
+        r = results[0]
+        if resource_type == "album":
+            return {
+                "artist":       r.get("artistName", ""),
+                "track_title":  r.get("collectionName", ""),
+                "album":        r.get("collectionName", ""),
+                "release_type": "album",
+            }
         return {
-            "artist":       data["artists"][0]["name"],
-            "title":        data["name"],
-            "album":        data["album"]["name"],
-            "release_type": data["album"]["album_type"],
-        }
-
-    def get_album_metadata(self, album_id: str) -> dict:
-        token = self._get_token()
-        resp = requests.get(
-            f"{self.API_BASE}/albums/{album_id}",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return {
-            "artist":       data["artists"][0]["name"],
-            "album":        data["name"],
-            "release_type": data["album_type"],
+            "artist":       r.get("artistName", ""),
+            "track_title":  r.get("trackName", ""),
+            "album":        r.get("collectionName", ""),
+            "release_type": "single",
         }
 
 
@@ -274,7 +256,7 @@ _SPOTIFY_RESOURCE_RE = re.compile(
 def fetch_metadata_for_row(
     url: str,
     url_type: str,
-    spotify_client: "SpotifyClient | None",
+    itunes_client: "ItunesClient",
     yt_extractor: "YoutubeExtractor",
 ) -> dict:
     """Route metadata fetch to the correct service based on url_type.
@@ -286,11 +268,7 @@ def fetch_metadata_for_row(
         if not m:
             raise ValueError(f"Cannot parse Spotify resource from URL: {url!r}")
         resource_type = m.group(1)
-        resource_id   = m.group(2)
-        if resource_type == "album":
-            metadata = spotify_client.get_album_metadata(resource_id)
-        else:
-            metadata = spotify_client.get_track_metadata(resource_id)
+        metadata = itunes_client.get_metadata(url, resource_type)
         metadata["source"] = "Spotify"
         return metadata
     else:  # YouTube
@@ -572,7 +550,6 @@ class TuneBridgeApp(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        load_dotenv()  # D-01: .env credentials loaded once at startup
         self.setWindowTitle("TuneBridge")
         self.setMinimumSize(800, 520)
         self.setStyleSheet(TUNEBRIDGE_QSS)
@@ -636,27 +613,11 @@ class TuneBridgeApp(QMainWindow):
         self._executor = ThreadPoolExecutor(max_workers=self._MAX_WORKERS)
         self._closing  = threading.Event()
 
-        # Spotify credential gating (D-01, D-02)
-        client_id     = os.getenv("SPOTIFY_CLIENT_ID", "").strip()
-        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET", "").strip()
-        if client_id and client_secret:
-            self._spotify_client  = SpotifyClient(client_id, client_secret)
-            self._spotify_enabled = True
-        else:
-            self._spotify_client  = None
-            self._spotify_enabled = False
+        # Metadata clients — no credentials required
+        self._itunes_client = ItunesClient()
+        self._yt_extractor  = YoutubeExtractor()
 
-        # YouTube extractor — no credentials required (META-02)
-        self._yt_extractor = YoutubeExtractor()
-
-        # Status bar
-        if self._spotify_enabled:
-            self.statusBar().showMessage("Ready — add songs to begin")
-        else:
-            self.statusBar().showMessage(
-                "Spotify credentials not found — Spotify rows will be skipped. "
-                "Add .env with SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET."
-            )
+        self.statusBar().showMessage("Ready — add songs to begin")
 
     def _process_urls(self, raw: str) -> None:
         lines = [line.strip() for line in raw.splitlines()]
@@ -670,22 +631,13 @@ class TuneBridgeApp(QMainWindow):
             url_type = classify_url(url)
             if url_type is not None:
                 row_id = self.table.add_row(url=url, url_type=url_type)
-                # D-02 + D-07: Spotify rows fail fast when credentials missing.
-                # Emitting "Failed — metadata" fires _on_row_failed synchronously,
-                # which updates stat cards directly — don't count in valid_count.
-                if url_type == "Spotify" and not self._spotify_enabled:
-                    self._dispatcher.row_status_changed.emit(
-                        row_id, "Failed — metadata"
-                    )
-                else:
-                    valid_count += 1
-                    # D-03 + D-04: transition to Fetching, submit worker.
-                    self._dispatcher.row_status_changed.emit(
-                        row_id, SongStatus.FETCHING.value
-                    )
-                    self._executor.submit(
-                        self._metadata_worker, row_id, url, url_type
-                    )
+                valid_count += 1
+                self._dispatcher.row_status_changed.emit(
+                    row_id, SongStatus.FETCHING.value
+                )
+                self._executor.submit(
+                    self._metadata_worker, row_id, url, url_type
+                )
             else:
                 self.table.add_row(url=url, url_type="Invalid URL")
                 invalid_count += 1
@@ -721,7 +673,7 @@ class TuneBridgeApp(QMainWindow):
             metadata = fetch_metadata_for_row(
                 url            = url,
                 url_type       = url_type,
-                spotify_client = self._spotify_client,
+                itunes_client  = self._itunes_client,
                 yt_extractor   = self._yt_extractor,
             )
             if not self._closing.is_set():
