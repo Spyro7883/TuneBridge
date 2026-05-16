@@ -27,10 +27,12 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMainWindow,
+    QPushButton,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
@@ -105,6 +107,38 @@ QScrollBar::handle:vertical {
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
+}
+QPushButton[hz_btn="true"] {
+    background-color: rgba(255,255,255,10);
+    border: 1px solid rgba(255,255,255,20);
+    border-radius: 6px;
+    color: #B3B3B3;
+    padding: 4px 16px;
+    font-size: 10pt;
+}
+QPushButton[hz_btn="true"]:checked {
+    background-color: rgba(29, 185, 84, 40);
+    border: 1px solid #1DB954;
+    color: #1DB954;
+    font-weight: bold;
+}
+QPushButton[hz_btn="true"]:disabled {
+    color: #444444;
+    border-color: rgba(255,255,255,10);
+}
+QPushButton#start_btn {
+    background-color: rgba(29, 185, 84, 51);
+    border: 1px solid #1DB954;
+    border-radius: 6px;
+    color: #1DB954;
+    padding: 6px 20px;
+    font-size: 10pt;
+    font-weight: bold;
+}
+QPushButton#start_btn:disabled {
+    background-color: rgba(255,255,255,10);
+    border: 1px solid rgba(255,255,255,20);
+    color: #444444;
 }
 """
 
