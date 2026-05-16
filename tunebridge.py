@@ -906,6 +906,11 @@ class TuneBridgeApp(QMainWindow):
             )
             if not self._closing.is_set():
                 self._dispatcher.metadata_ready.emit(row_id, metadata)
+                # Emit row_status_changed so _refresh_start_button sees METADATA_READY
+                # (update_row_metadata sets cell directly; the signal never fires otherwise)
+                self._dispatcher.row_status_changed.emit(
+                    row_id, SongStatus.METADATA_READY.value
+                )
         except Exception as exc:
             logging.getLogger(__name__).warning(
                 "Metadata fetch failed for row %d (%s): %s", row_id, url, exc
