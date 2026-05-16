@@ -246,6 +246,7 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         ytdlp, "--no-playlist",
+        "--no-check-certificate",          # Windows SSL proxy/AV interception workaround
         "--cookies-from-browser", "firefox",
         "-x", "--audio-format", "mp3", "--audio-quality", "192K",
         "-o", str(out_dir / "%(title)s.%(ext)s"),
