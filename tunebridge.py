@@ -1035,6 +1035,9 @@ class TuneBridgeApp(QMainWindow):
                 jobs.append((row_id, url, url_type, metadata))
 
         if not jobs:
+            logging.getLogger(__name__).warning(
+                "_start_processing called with no METADATA_READY rows"
+            )
             return   # nothing to do — guard against empty batch
 
         # Lock UI — no edits during active batch run (D-03)
