@@ -85,7 +85,7 @@ Plans:
 
 Plans:
 **Wave 0**
-- [ ] 04-01-PLAN.md — Test scaffold: 10 RED-gate tests covering DL-01 through DL-04 (ytsearch query, Spotify/YouTube paths, failure isolation, Hz toggle, Start button gate, retune, status transitions)
+- [x] 04-01-PLAN.md — Test scaffold: 10 RED-gate tests covering DL-01 through DL-04 (ytsearch query, Spotify/YouTube paths, failure isolation, Hz toggle, Start button gate, retune, status transitions)
 
 **Wave 1** *(blocked on Wave 0 completion)*
 - [ ] 04-02-PLAN.md — Core infrastructure: retune_file (verbatim from retune_app.py), download_track_for_row (_download_lock serialization), SongStatus.FAILED_DOWNLOAD, _row_metadata gap fix, temp dir lifecycle state
@@ -128,7 +128,7 @@ Plans:
 | 1. Foundation | 2/2 | Complete | 2026-05-12 |
 | 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
 | 3. Metadata Services | 4/4 | Complete | 2026-05-15 |
-| 4. Download Pipeline | 0/4 | Planning complete | - |
+| 4. Download Pipeline | 1/4 | Executing (Wave 0 done) | - |
 | 5. Organization | 0/? | Not started | - |
 | 6. iBroadcast Upload | 0/? | Not started | - |
 
