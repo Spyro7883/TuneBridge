@@ -148,6 +148,9 @@ QPushButton#start_btn:disabled {
 
 _download_lock = threading.Lock()   # Serializes yt-dlp subprocess — Firefox cookie safety (D-07)
 
+# WR-04: Both terminal-failure statuses that must trigger _on_row_failed callback
+FAILURE_STATUSES: frozenset[str] = frozenset({"Failed — metadata", "Failed — download"})
+
 SRC_A4 = 440.0
 DST_A4 = 432.0
 RATIO   = DST_A4 / SRC_A4
@@ -617,7 +620,7 @@ class BatchTable(QWidget):
         if item2:
             item2.setText(status)
             item2.setForeground(QBrush(color))
-        if status == "Failed — metadata" and self._on_row_failed:
+        if status in FAILURE_STATUSES and self._on_row_failed:
             self._on_row_failed()
 
     def update_row_metadata(self, row_id: int, metadata: dict) -> None:
