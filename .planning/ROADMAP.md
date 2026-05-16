@@ -91,7 +91,7 @@ Plans:
 - [x] 04-02-PLAN.md — Core infrastructure: retune_file (verbatim from retune_app.py), download_track_for_row (_download_lock serialization), SongStatus.FAILED_DOWNLOAD, _row_metadata gap fix, temp dir lifecycle state
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 04-03-PLAN.md — Toolbar UI: segmented control (440Hz | 432Hz), Start Processing button, _refresh_start_button all-METADATA_READY gate, signal wiring
+- [x] 04-03-PLAN.md — Toolbar UI: segmented control (440Hz | 432Hz), Start Processing button, _refresh_start_button all-METADATA_READY gate, signal wiring
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 04-04-PLAN.md — Download worker + _start_processing batch launch + batch completion counter + status bar live updates — 62+ tests GREEN
@@ -128,7 +128,7 @@ Plans:
 | 1. Foundation | 2/2 | Complete | 2026-05-12 |
 | 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
 | 3. Metadata Services | 4/4 | Complete | 2026-05-15 |
-| 4. Download Pipeline | 2/4 | Executing (Wave 1 done) | - |
+| 4. Download Pipeline | 3/4 | Executing (Wave 2 done) | - |
 | 5. Organization | 0/? | Not started | - |
 | 6. iBroadcast Upload | 0/? | Not started | - |
 
