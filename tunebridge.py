@@ -151,6 +151,13 @@ _download_lock = threading.Lock()   # Serializes yt-dlp subprocess — Firefox c
 # WR-04: Both terminal-failure statuses that must trigger _on_row_failed callback
 FAILURE_STATUSES: frozenset[str] = frozenset({"Failed — metadata", "Failed — download"})
 
+
+def _sanitise_search_term(s: str) -> str:
+    """Strip control chars and leading dashes from scraped metadata before ytsearch: query."""
+    s = re.sub(r"[\x00-\x1f\x7f]", " ", s)
+    return s.strip().lstrip("-")[:100]
+
+
 SRC_A4 = 440.0
 DST_A4 = 432.0
 RATIO   = DST_A4 / SRC_A4
@@ -929,8 +936,8 @@ class TuneBridgeApp(QMainWindow):
 
             # Route: Spotify uses ytsearch with Phase 3 metadata (D-01); YouTube uses direct URL (D-02)
             if url_type == "Spotify":
-                artist = metadata.get("artist", "")
-                title  = metadata.get("track_title", "")
+                artist = _sanitise_search_term(metadata.get("artist", ""))
+                title  = _sanitise_search_term(metadata.get("track_title", ""))
                 search_url = f"ytsearch:{artist} {title} audio"
             else:
                 search_url = url
