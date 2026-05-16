@@ -771,6 +771,34 @@ class TuneBridgeApp(QMainWindow):
             self._card_valid.set_count(max(0, self._card_valid.count() - 1)),
             self._card_invalid.set_count(self._card_invalid.count() + 1),
         )
+
+        # Toolbar row: Hz segmented control + Start button (D-04, D-05, D-06)
+        toolbar_row = QHBoxLayout()
+        toolbar_row.setSpacing(8)
+
+        self._hz_group = QButtonGroup(self)
+        self._hz_group.setExclusive(True)
+
+        self._btn_440 = QPushButton("440 Hz")
+        self._btn_432 = QPushButton("432 Hz")
+        for btn in (self._btn_440, self._btn_432):
+            btn.setCheckable(True)
+            btn.setProperty("hz_btn", True)
+        self._btn_440.setChecked(True)       # D-05: default 440Hz
+        self._hz_group.addButton(self._btn_440, 440)
+        self._hz_group.addButton(self._btn_432, 432)
+
+        toolbar_row.addWidget(self._btn_440)
+        toolbar_row.addWidget(self._btn_432)
+        toolbar_row.addStretch()
+
+        self._btn_start = QPushButton("Start Processing")
+        self._btn_start.setObjectName("start_btn")
+        self._btn_start.setEnabled(False)   # D-02: disabled until all rows METADATA_READY
+        self._btn_start.clicked.connect(self._start_processing)
+        toolbar_row.addWidget(self._btn_start)
+
+        layout.addLayout(toolbar_row)
         layout.addWidget(self.table)
 
         # Thread dispatcher
@@ -794,6 +822,8 @@ class TuneBridgeApp(QMainWindow):
         self._dispatcher.metadata_ready.connect(
             lambda row_id, meta: self._row_metadata.__setitem__(row_id, meta)
         )
+        # Re-evaluate Start button on every row status change (D-02)
+        self._dispatcher.row_status_changed.connect(self._refresh_start_button)
 
         # Metadata clients — no credentials required
         self._itunes_client = ItunesClient()
@@ -837,6 +867,7 @@ class TuneBridgeApp(QMainWindow):
             )
 
         self._paste_box.setFocus()
+        self._refresh_start_button()   # re-evaluate after new rows added
 
     def _clear_all(self) -> None:
         """Explicit clear — also triggered via table._on_clear."""
@@ -865,6 +896,27 @@ class TuneBridgeApp(QMainWindow):
             )
             if not self._closing.is_set():
                 self._dispatcher.row_status_changed.emit(row_id, "Failed — metadata")
+
+    def _refresh_start_button(self, _row_id: int = 0, _status: str = "") -> None:
+        """Re-evaluate Start button enabled state. Must only run on main thread (D-02).
+
+        Connected as slot to _dispatcher.row_status_changed. Also called after
+        _process_urls adds rows. Enables Start iff ALL rows show METADATA_READY.
+        """
+        row_count = self.table._table.rowCount()
+        if row_count == 0:
+            self._btn_start.setEnabled(False)
+            return
+        all_ready = all(
+            (item := self.table._table.item(r, 2)) is not None
+            and item.text() == SongStatus.METADATA_READY.value
+            for r in range(row_count)
+        )
+        self._btn_start.setEnabled(all_ready)
+
+    def _start_processing(self) -> None:
+        """Start Processing button handler — implemented in Wave 3 (04-04-PLAN.md)."""
+        pass   # Wave 3 replaces this stub
 
     def closeEvent(self, event) -> None:
         """Shutdown thread pool and clean up leftover temp files on window close (D-12)."""
