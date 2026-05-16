@@ -163,6 +163,12 @@ def retune_file(in_path: Path, out_path: Path) -> None:
     Copied verbatim from retune_app.py. Handles mono/stereo via channel loop.
     Preserves original ID3 tags via mutagen.
     """
+    try:
+        from mutagen.mp3 import MP3
+        from mutagen.id3 import ID3
+    except ImportError:
+        MP3 = ID3 = None  # type: ignore[assignment,misc]
+
     y, sr = librosa.load(str(in_path), sr=None, mono=False)
     if y.ndim == 1:
         y = y[np.newaxis, :]
@@ -181,8 +187,6 @@ def retune_file(in_path: Path, out_path: Path) -> None:
 
     original_tags = {}
     try:
-        from mutagen.mp3 import MP3
-        from mutagen.id3 import ID3
         orig_id3 = ID3(str(in_path))
         for key in orig_id3:
             original_tags[key] = orig_id3[key]
@@ -203,8 +207,6 @@ def retune_file(in_path: Path, out_path: Path) -> None:
 
     if original_tags:
         try:
-            from mutagen.mp3 import MP3
-            from mutagen.id3 import ID3
             audio = MP3(str(out_path))
             if audio.tags is None:
                 audio.add_tags()
@@ -213,8 +215,10 @@ def retune_file(in_path: Path, out_path: Path) -> None:
                     value.encoding = 3  # UTF-8
                 audio.tags.add(value)
             audio.save(v2_version=3)
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "ID3 tag restoration failed for %s: %s", out_path, exc
+            )
 
 
 def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
