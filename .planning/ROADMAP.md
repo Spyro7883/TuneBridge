@@ -81,7 +81,20 @@ Plans:
   2. A YouTube-sourced song downloads directly from its provided URL as audio-only MP3 — no search step
   3. User can select "440Hz (original)" or "432Hz (retune)" for the batch before processing starts — the toggle is visible and the choice persists for all songs in that batch
   4. When 432Hz is selected, the downloaded file is retuned via librosa pitch shift before being passed to the organization step; row status shows "Retuning" during this step
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 0**
+- [ ] 04-01-PLAN.md — Test scaffold: 10 RED-gate tests covering DL-01 through DL-04 (ytsearch query, Spotify/YouTube paths, failure isolation, Hz toggle, Start button gate, retune, status transitions)
+
+**Wave 1** *(blocked on Wave 0 completion)*
+- [ ] 04-02-PLAN.md — Core infrastructure: retune_file (verbatim from retune_app.py), download_track_for_row (_download_lock serialization), SongStatus.FAILED_DOWNLOAD, _row_metadata gap fix, temp dir lifecycle state
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 04-03-PLAN.md — Toolbar UI: segmented control (440Hz | 432Hz), Start Processing button, _refresh_start_button all-METADATA_READY gate, signal wiring
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 04-04-PLAN.md — Download worker + _start_processing batch launch + batch completion counter + status bar live updates — 62+ tests GREEN
 
 ### Phase 5: Organization
 **Goal**: Each downloaded song is confirmed by the user into an existing folder before saving — with a smart default, skip option, and no folder creation
@@ -115,10 +128,10 @@ Plans:
 | 1. Foundation | 2/2 | Complete | 2026-05-12 |
 | 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
 | 3. Metadata Services | 4/4 | Complete | 2026-05-15 |
-| 4. Download Pipeline | 0/? | Not started | - |
+| 4. Download Pipeline | 0/4 | Planning complete | - |
 | 5. Organization | 0/? | Not started | - |
 | 6. iBroadcast Upload | 0/? | Not started | - |
 
 ---
 
-*Last updated: 2026-05-15*
+*Last updated: 2026-05-16*
