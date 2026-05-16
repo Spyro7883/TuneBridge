@@ -823,7 +823,7 @@ class TuneBridgeApp(QMainWindow):
         self._download_total         = 0
         self._download_done          = 0
         self._download_failed        = 0
-        self._download_lock_counter  = threading.Lock()
+        self._temp_paths_lock        = threading.Lock()   # guards _temp_paths cross-thread writes
 
         # Store Phase 3 metadata for Phase 4 download worker (_row_metadata gap fix)
         self._dispatcher.metadata_ready.connect(
@@ -952,7 +952,8 @@ class TuneBridgeApp(QMainWindow):
 
             if not self._closing.is_set():
                 self._dispatcher.row_status_changed.emit(row_id, SongStatus.AWAITING.value)
-                self._temp_paths[row_id] = downloaded   # Phase 5 handoff (D-11)
+                with self._temp_paths_lock:
+                    self._temp_paths[row_id] = downloaded   # Phase 5 handoff (D-11)
 
         except Exception as exc:
             logging.getLogger(__name__).warning(
@@ -966,19 +967,17 @@ class TuneBridgeApp(QMainWindow):
     def _on_download_row_finished(self, _row_id: int, status: str) -> None:
         """Slot: track batch completion progress. Connected only during active batch run.
 
-        Runs on main thread via Qt queued connection. Uses _download_lock_counter
-        to safely increment counters (main thread only — lock is extra safety). (D-16)
+        Runs on main thread via Qt queued connection — plain int increments are safe. (D-16)
         """
         terminal = (SongStatus.AWAITING.value, SongStatus.FAILED_DOWNLOAD.value)
         if status not in terminal:
             return
 
-        with self._download_lock_counter:
-            if status == SongStatus.AWAITING.value:
-                self._download_done += 1
-            else:
-                self._download_failed += 1
-            finished = self._download_done + self._download_failed
+        if status == SongStatus.AWAITING.value:
+            self._download_done += 1
+        else:
+            self._download_failed += 1
+        finished = self._download_done + self._download_failed
 
         if finished < self._download_total:
             self.statusBar().showMessage(
