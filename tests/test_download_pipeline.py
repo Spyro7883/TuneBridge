@@ -45,25 +45,16 @@ def window(qapp):
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_spotify_search_query_uses_artist_and_title():
+def test_spotify_search_query_uses_artist_and_title(window):
     """DL-01: Spotify path builds ytsearch:{artist} {title} audio — not raw URL."""
     metadata = {"artist": "Portishead", "track_title": "Glory Box", "source": "Spotify"}
-    # _download_worker builds the query internally; test via download_track_for_row mock
+    fake_mp3 = window._session_tmp / "abcdef12" / "track.mp3"
     with patch("tunebridge.download_track_for_row") as mock_dl, \
-         patch("tunebridge.tempfile.mkdtemp", return_value="/tmp/tb_test"):
-        mock_dl.return_value = Path("/tmp/tb_test/track.mp3")
-        # Access the internal query construction via a thin wrapper call
-        # We verify the search_url arg passed to download_track_for_row
-        app = TuneBridgeApp.__new__(TuneBridgeApp)
-        # Manually set required state
-        app._closing = threading.Event()
-        app._session_tmp = Path("/tmp/tb_test")
-        app._temp_paths = {}
-        app._dispatcher = MagicMock()
-        import uuid as _uuid
+         patch("pathlib.Path.mkdir"):
+        mock_dl.return_value = fake_mp3
         with patch("tunebridge.uuid.uuid4") as mock_uuid:
             mock_uuid.return_value.hex = "abcdef1234567890"
-            app._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 440)
+            window._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 440)
         called_url = mock_dl.call_args[0][0]
         assert called_url == "ytsearch:Portishead Glory Box audio", (
             f"Expected ytsearch query, got: {called_url!r}"
