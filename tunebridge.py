@@ -1007,8 +1007,50 @@ class TuneBridgeApp(QMainWindow):
         self._btn_start.setEnabled(all_ready)
 
     def _start_processing(self) -> None:
-        """Start Processing button handler — implemented in Wave 3 (04-04-PLAN.md)."""
-        pass   # Wave 3 replaces this stub
+        """Start Processing button handler. Locks UI, submits download workers (D-01-D-04).
+
+        Called on main thread when user clicks Start Processing. Reads hz_mode from
+        segmented control before locking UI. Workers run in existing ThreadPoolExecutor.
+        _on_download_row_finished is connected here (batch-scoped) to track completion.
+        """
+        hz_mode = self._hz_group.checkedId()   # 440 or 432 (D-06)
+
+        # Collect METADATA_READY rows before locking (read table on main thread)
+        row_count = self.table._table.rowCount()
+        jobs: list[tuple[int, str, str, dict]] = []
+        for row_id in range(row_count):
+            item2 = self.table._table.item(row_id, 2)
+            if item2 and item2.text() == SongStatus.METADATA_READY.value:
+                url       = self.table._rows.get(row_id, "")
+                type_item = self.table._table.item(row_id, 1)
+                url_type  = type_item.text() if type_item else ""
+                metadata  = self._row_metadata.get(row_id, {})
+                jobs.append((row_id, url, url_type, metadata))
+
+        if not jobs:
+            return   # nothing to do — guard against empty batch
+
+        # Lock UI — no edits during active batch run (D-03)
+        self._paste_box.setReadOnly(True)
+        self._btn_start.setEnabled(False)
+        self._btn_440.setEnabled(False)
+        self._btn_432.setEnabled(False)
+
+        # Reset batch counters
+        self._download_total   = len(jobs)
+        self._download_done    = 0
+        self._download_failed  = 0
+
+        # Connect batch-completion tracker (disconnect guard handled in _on_download_row_finished)
+        self._dispatcher.row_status_changed.connect(self._on_download_row_finished)
+
+        self.statusBar().showMessage(f"Downloading 0 / {self._download_total}…")
+
+        # Submit one worker per row — yt-dlp serialized inside download_track_for_row (D-07)
+        for row_id, url, url_type, metadata in jobs:
+            self._executor.submit(
+                self._download_worker, row_id, url, url_type, metadata, hz_mode
+            )
 
     def closeEvent(self, event) -> None:
         """Shutdown thread pool and clean up leftover temp files on window close (D-12)."""
