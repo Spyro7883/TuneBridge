@@ -2,6 +2,7 @@
 """TuneBridge — Phase 2: Input & Detection (PySide6 Liquid Glass)."""
 from __future__ import annotations
 
+import atexit
 import logging
 import math
 import re
@@ -824,6 +825,7 @@ class TuneBridgeApp(QMainWindow):
 
         # Phase 4: temp file lifecycle (D-10, D-11, D-12)
         self._session_tmp            = Path(tempfile.mkdtemp(prefix="tunebridge_"))
+        atexit.register(shutil.rmtree, self._session_tmp, True)   # CR-03: guarantee cleanup on Windows
         self._temp_paths: dict[int, Path] = {}      # row_id → temp MP3 for Phase 5 handoff
         self._row_metadata: dict[int, dict] = {}    # row_id → Phase 3 metadata dict (_row_metadata gap fix)
         # Phase 4: batch completion tracking (D-16)
