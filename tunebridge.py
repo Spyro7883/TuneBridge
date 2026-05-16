@@ -897,6 +897,98 @@ class TuneBridgeApp(QMainWindow):
             if not self._closing.is_set():
                 self._dispatcher.row_status_changed.emit(row_id, "Failed — metadata")
 
+    def _download_worker(
+        self,
+        row_id: int,
+        url: str,
+        url_type: str,
+        metadata: dict,
+        hz_mode: int,
+    ) -> None:
+        """Worker thread: download + optional retune. Per-row error isolation.
+
+        Mirrors _metadata_worker exactly: closing guard → try/except → emit signal.
+        _download_lock is acquired inside download_track_for_row — never here.
+        Routing: Spotify → ytsearch:{artist} {title} audio; YouTube → direct URL (D-01, D-02).
+        """
+        if self._closing.is_set():
+            return
+        try:
+            self._dispatcher.row_status_changed.emit(row_id, SongStatus.DOWNLOADING.value)
+
+            # Per-row isolated temp subdir (D-10) — uuid prefix prevents glob collision
+            row_tmp = self._session_tmp / uuid.uuid4().hex[:8]
+            row_tmp.mkdir(parents=True, exist_ok=True)
+
+            # Route: Spotify uses ytsearch with Phase 3 metadata (D-01); YouTube uses direct URL (D-02)
+            if url_type == "Spotify":
+                artist = metadata.get("artist", "")
+                title  = metadata.get("track_title", "")
+                search_url = f"ytsearch:{artist} {title} audio"
+            else:
+                search_url = url
+
+            downloaded = download_track_for_row(search_url, row_tmp)
+            if not downloaded:
+                raise RuntimeError("No audio file found after yt-dlp download.")
+
+            if hz_mode == 432:
+                # Retune runs in parallel — no cookie conflict risk (D-08)
+                self._dispatcher.row_status_changed.emit(row_id, SongStatus.RETUNING.value)
+                out_path = row_tmp / (downloaded.stem + "_432hz.mp3")
+                retune_file(downloaded, out_path)
+                try:
+                    downloaded.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                downloaded = out_path
+
+            if not self._closing.is_set():
+                self._dispatcher.row_status_changed.emit(row_id, SongStatus.AWAITING.value)
+                self._temp_paths[row_id] = downloaded   # Phase 5 handoff (D-11)
+
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Download failed for row %d (%s): %s", row_id, url, exc
+            )
+            if not self._closing.is_set():
+                self._dispatcher.row_status_changed.emit(
+                    row_id, SongStatus.FAILED_DOWNLOAD.value
+                )
+
+    def _on_download_row_finished(self, _row_id: int, status: str) -> None:
+        """Slot: track batch completion progress. Connected only during active batch run.
+
+        Runs on main thread via Qt queued connection. Uses _download_lock_counter
+        to safely increment counters (main thread only — lock is extra safety). (D-16)
+        """
+        terminal = (SongStatus.AWAITING.value, SongStatus.FAILED_DOWNLOAD.value)
+        if status not in terminal:
+            return
+
+        with self._download_lock_counter:
+            if status == SongStatus.AWAITING.value:
+                self._download_done += 1
+            else:
+                self._download_failed += 1
+            finished = self._download_done + self._download_failed
+
+        if finished < self._download_total:
+            self.statusBar().showMessage(
+                f"Downloading {finished} / {self._download_total}…"
+            )
+            return
+
+        # All workers have finished — update status bar and unlock UI (D-16, D-03)
+        self.statusBar().showMessage(
+            f"Done — {self._download_done} downloaded, {self._download_failed} failed"
+        )
+        # Disconnect this slot — it is only valid for this batch run
+        try:
+            self._dispatcher.row_status_changed.disconnect(self._on_download_row_finished)
+        except RuntimeError:
+            pass   # already disconnected
+
     def _refresh_start_button(self, _row_id: int = 0, _status: str = "") -> None:
         """Re-evaluate Start button enabled state. Must only run on main thread (D-02).
 
