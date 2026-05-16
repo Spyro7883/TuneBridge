@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import threading
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
+from pathlib import Path
 
 import html as _html
+import librosa
+import numpy as np
 import requests
+import soundfile as sf
 import yt_dlp
 
 from PySide6.QtCore import QObject, Signal
@@ -100,6 +109,133 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 """
 
 # ---------------------------------------------------------------------------
+# Download infrastructure (Phase 4)
+# ---------------------------------------------------------------------------
+
+_download_lock = threading.Lock()   # Serializes yt-dlp subprocess — Firefox cookie safety (D-07)
+
+SRC_A4 = 440.0
+DST_A4 = 432.0
+RATIO   = DST_A4 / SRC_A4
+
+
+def semitones_for_ratio(ratio: float) -> float:
+    return 12.0 * math.log(ratio, 2)
+
+
+def retune_file(in_path: Path, out_path: Path) -> None:
+    """Pitch-shift in_path from 440Hz to 432Hz, write MP3 to out_path.
+
+    Copied verbatim from retune_app.py. Handles mono/stereo via channel loop.
+    Preserves original ID3 tags via mutagen.
+    """
+    y, sr = librosa.load(str(in_path), sr=None, mono=False)
+    if y.ndim == 1:
+        y = y[np.newaxis, :]
+
+    n_steps = semitones_for_ratio(RATIO)
+    channels = []
+    for ch in y:
+        channels.append(librosa.effects.pitch_shift(ch, sr=sr, n_steps=n_steps))
+
+    y_out = np.clip(np.stack(channels, axis=0), -1.0, 1.0).T
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found in PATH.")
+
+    original_tags = {}
+    try:
+        from mutagen.mp3 import MP3
+        from mutagen.id3 import ID3
+        orig_id3 = ID3(str(in_path))
+        for key in orig_id3:
+            original_tags[key] = orig_id3[key]
+    except Exception:
+        pass
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp_wav = Path(td) / (out_path.stem + ".wav")
+        sf.write(str(tmp_wav), y_out, sr)
+        cmd = [
+            ffmpeg, "-y", "-i", str(tmp_wav),
+            "-vn", "-codec:a", "libmp3lame", "-b:a", "192k",
+            str(out_path),
+        ]
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if p.returncode != 0:
+            raise RuntimeError(f"ffmpeg error: {p.stderr[:300]}")
+
+    if original_tags:
+        try:
+            from mutagen.mp3 import MP3
+            from mutagen.id3 import ID3
+            audio = MP3(str(out_path))
+            if audio.tags is None:
+                audio.add_tags()
+            for key, value in original_tags.items():
+                if hasattr(value, 'encoding'):
+                    value.encoding = 3  # UTF-8
+                audio.tags.add(value)
+            audio.save(v2_version=3)
+        except Exception:
+            pass
+
+
+def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
+    """Download audio via yt-dlp to out_dir. Serialized via _download_lock (D-07).
+
+    search_url is either a ytsearch: string (Spotify rows) or a direct YouTube URL.
+    Spotify routing is done in _download_worker — this function is URL-agnostic.
+    CRITICAL: _download_lock wraps entire Popen+wait cycle — do NOT narrow scope.
+    """
+    ytdlp = shutil.which("yt-dlp")
+    if not ytdlp:
+        raise RuntimeError("yt-dlp not found. Install: pip install yt-dlp")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        ytdlp, "--no-playlist",
+        "--cookies-from-browser", "firefox",
+        "-x", "--audio-format", "mp3", "--audio-quality", "192K",
+        "-o", str(out_dir / "%(title)s.%(ext)s"),
+        search_url,
+    ]
+
+    with _download_lock:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        def _kill_if_stuck() -> None:
+            try:
+                if process.poll() is None:
+                    process.kill()
+            except Exception:
+                pass
+
+        timer = threading.Timer(600, _kill_if_stuck)
+        timer.start()
+        try:
+            process.stdout.read()   # drain — status updates go via dispatcher signals
+            process.wait()
+        finally:
+            timer.cancel()
+
+        if process.returncode != 0:
+            raise RuntimeError("yt-dlp download failed or timed out.")
+
+    mp3s = sorted(out_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return mp3s[0] if mp3s else None
+
+
+# ---------------------------------------------------------------------------
 # Domain
 # ---------------------------------------------------------------------------
 
@@ -115,6 +251,7 @@ class SongStatus(Enum):
     DONE            = "Done"
     FAILED          = "Failed"
     METADATA_READY  = "Metadata ready"
+    FAILED_DOWNLOAD = "Failed — download"   # D-13: per-row download failure status
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +499,7 @@ class BatchTable(QWidget):
         "Skipped — bad URL": QColor("#EF4444"),
         "Metadata ready":    QColor("#1DB954"),
         "Failed — metadata": QColor("#EF4444"),
+        "Failed — download": QColor("#EF4444"),   # D-13
     }
 
     _TYPE_COLORS: dict[str, QColor] = {
