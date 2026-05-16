@@ -746,6 +746,21 @@ class TuneBridgeApp(QMainWindow):
         self._executor = ThreadPoolExecutor(max_workers=self._MAX_WORKERS)
         self._closing  = threading.Event()
 
+        # Phase 4: temp file lifecycle (D-10, D-11, D-12)
+        self._session_tmp            = Path(tempfile.mkdtemp(prefix="tunebridge_"))
+        self._temp_paths: dict[int, Path] = {}      # row_id → temp MP3 for Phase 5 handoff
+        self._row_metadata: dict[int, dict] = {}    # row_id → Phase 3 metadata dict (_row_metadata gap fix)
+        # Phase 4: batch completion tracking (D-16)
+        self._download_total         = 0
+        self._download_done          = 0
+        self._download_failed        = 0
+        self._download_lock_counter  = threading.Lock()
+
+        # Store Phase 3 metadata for Phase 4 download worker (_row_metadata gap fix)
+        self._dispatcher.metadata_ready.connect(
+            lambda row_id, meta: self._row_metadata.__setitem__(row_id, meta)
+        )
+
         # Metadata clients — no credentials required
         self._itunes_client = ItunesClient()
         self._yt_extractor  = YoutubeExtractor()
@@ -818,9 +833,13 @@ class TuneBridgeApp(QMainWindow):
                 self._dispatcher.row_status_changed.emit(row_id, "Failed — metadata")
 
     def closeEvent(self, event) -> None:
-        """Shutdown the persistent thread pool on window close."""
+        """Shutdown thread pool and clean up leftover temp files on window close (D-12)."""
         self._closing.set()
         self._executor.shutdown(wait=False)
+        try:
+            shutil.rmtree(self._session_tmp, ignore_errors=True)
+        except Exception:
+            pass
         super().closeEvent(event)
 
 
