@@ -4,21 +4,21 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 last_updated: "2026-05-16T00:00:00.000Z"
-last_activity: 2026-05-16 -- Phase 04 executing (3/4 plans done); Wave 2 toolbar UI complete — toolbar_row, _btn_440/_btn_432/_hz_group/_btn_start, _refresh_start_button, 55 GREEN
+last_activity: 2026-05-16 -- Phase 04 complete (4/4 plans done); Wave 3 download worker — _download_worker, _on_download_row_finished, _start_processing full batch launch; 62 GREEN
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 16
-  completed_plans: 12
-  percent: 56
+  completed_plans: 13
+  percent: 62
 ---
 
 ## Current Position
 
-Phase: Phase 4 — Download Pipeline (executing)
-Plan: 04-04 (Wave 3 — Download Worker)
-Status: Executing — 3/4 plans done
-Last activity: 2026-05-16 -- 04-03 complete: toolbar_row UI, QButtonGroup Hz toggle (440 default), _btn_start gate, _refresh_start_button wired to row_status_changed; 55 GREEN (3 DL-03 + 52 prior)
+Phase: Phase 4 — Download Pipeline (complete)
+Plan: 04-04 (Wave 3 — Download Worker) COMPLETE
+Status: Complete — 4/4 plans done; Phase 5 next
+Last activity: 2026-05-16 -- 04-04 complete: _download_worker + _on_download_row_finished + _start_processing batch launch; all 10 Phase 4 tests GREEN; 62 total GREEN
 
 ## Decisions
 
@@ -38,6 +38,9 @@ Last activity: 2026-05-16 -- 04-03 complete: toolbar_row UI, QButtonGroup Hz tog
 - Toolbar row inserted after BatchTable wiring — ensures _on_clear/_on_rows_removed are set before Start button evaluates
 - _start_processing stub added as pass body at Wave 2; Wave 3 replaces it with download dispatch logic
 - _refresh_start_button uses self.table._table (QTableWidget inner widget) — BatchTable exposes _table as private attribute
+- _on_download_row_finished connected batch-scoped in _start_processing (not __init__) — avoids spurious fires from prior status changes
+- Spotify search URL built as 'ytsearch:{artist} {title} audio' inside _download_worker using _row_metadata from Phase 3
+- _download_lock acquired inside download_track_for_row, never in _download_worker — worker body stays clean
 
 ## Blockers
 

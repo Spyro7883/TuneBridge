@@ -11,7 +11,7 @@
 - [x] **Phase 1: Foundation** — Dark GUI shell, batch table scaffold, threaded pipeline infrastructure, status state machine
 - [x] **Phase 2: Input & Detection** — Paste area, URL type classification, type badges, inline per-row error display
 - [x] **Phase 3: Metadata Services** — Spotify Web API client, yt-dlp info extraction, "(guessed)" label convention
-- [ ] **Phase 4: Download Pipeline** — Dual-path download (ytsearch vs direct), 432Hz retune toggle, audio-only MP3 output
+- [x] **Phase 4: Download Pipeline** — Dual-path download (ytsearch vs direct), 432Hz retune toggle, audio-only MP3 output
 - [ ] **Phase 5: Organization** — Folder proposal logic, per-song folder confirmation dialog with threading.Event safety, skip support, file save
 - [ ] **Phase 6: iBroadcast Upload** — Auth, duplicate check, upload to iBroadcast after file save
 
@@ -94,7 +94,7 @@ Plans:
 - [x] 04-03-PLAN.md — Toolbar UI: segmented control (440Hz | 432Hz), Start Processing button, _refresh_start_button all-METADATA_READY gate, signal wiring
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 04-04-PLAN.md — Download worker + _start_processing batch launch + batch completion counter + status bar live updates — 62+ tests GREEN
+- [x] 04-04-PLAN.md — Download worker + _start_processing batch launch + batch completion counter + status bar live updates — 62+ tests GREEN
 
 ### Phase 5: Organization
 **Goal**: Each downloaded song is confirmed by the user into an existing folder before saving — with a smart default, skip option, and no folder creation
@@ -128,7 +128,7 @@ Plans:
 | 1. Foundation | 2/2 | Complete | 2026-05-12 |
 | 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
 | 3. Metadata Services | 4/4 | Complete | 2026-05-15 |
-| 4. Download Pipeline | 3/4 | Executing (Wave 2 done) | - |
+| 4. Download Pipeline | 4/4 | Complete | 2026-05-16 |
 | 5. Organization | 0/? | Not started | - |
 | 6. iBroadcast Upload | 0/? | Not started | - |
 
