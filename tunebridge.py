@@ -24,7 +24,7 @@ import requests
 import soundfile as sf
 import yt_dlp
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -155,7 +155,11 @@ _dialog_lock   = threading.Lock()   # Serializes folder dialogs — one at a tim
 _BROWSER_FALLBACKS: tuple[str, ...] = ("firefox", "chrome", "edge", "brave", "chromium", "opera")
 
 # WR-04: Both terminal-failure statuses that must trigger _on_row_failed callback
-FAILURE_STATUSES: frozenset[str] = frozenset({"Failed — metadata", "Failed — download"})
+FAILURE_STATUSES: frozenset[str] = frozenset({
+    "Failed — metadata",
+    "Failed — download",
+    "Failed — save",
+})
 
 
 def _sanitise_search_term(s: str) -> str:
@@ -693,6 +697,11 @@ class BatchTable(QWidget):
 
         self.update_row_status(row_id, SongStatus.METADATA_READY.value)
 
+    def get_row_title(self, row_id: int) -> str:
+        """Return display title for row_id, or a fallback string if the cell is missing."""
+        item = self._table.item(row_id, 0)
+        return item.text() if item else f"Row {row_id}"
+
     def remove_selected_rows(self) -> int:
         """Delete selected rows. Returns count removed."""
         rows = sorted(
@@ -953,7 +962,10 @@ class TuneBridgeApp(QMainWindow):
         )
         # Re-evaluate Start button on every row status change (D-02)
         self._dispatcher.row_status_changed.connect(self._refresh_start_button)
-        self._dispatcher.folder_requested.connect(self._show_folder_dialog)
+        self._dispatcher.folder_requested.connect(
+            self._show_folder_dialog,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         # Metadata clients — no credentials required
         self._itunes_client = ItunesClient()
@@ -1093,10 +1105,11 @@ class TuneBridgeApp(QMainWindow):
                 )
 
     def _folder_worker(self, row_id: int) -> None:
-        """Worker thread: acquire dialog lock, block on threading.Event, move file or skip. (D-02/D-03)
+        """Worker thread: acquire dialog lock, block on threading.Event. (D-02/D-03)
 
-        Mirrors _download_worker: closing guard → lock acquire → emit signal → wait → I/O → emit result.
-        CRITICAL: _dialog_lock scope includes event registration AND event.wait() — must NOT be narrowed (Pitfall 3).
+        I/O, status emit, and _on_folder_row_finished are handled by _show_folder_dialog
+        on the main thread after ev.set(). This worker's job ends when the lock is released.
+        CRITICAL: _dialog_lock scope includes event registration AND event.wait() (Pitfall 3).
         """
         if self._closing.is_set():
             return
@@ -1109,36 +1122,7 @@ class TuneBridgeApp(QMainWindow):
             if not self._closing.is_set():
                 self._dispatcher.folder_requested.emit(row_id)    # main thread shows dialog
                 ev.wait()                                         # block until _show_folder_dialog sets event
-
-            result: Path | None = self._folder_results.get(row_id)
-        # Lock released — I/O happens outside the lock
-
-        try:
-            if result is None:
-                # Skip path (D-06)
-                with self._temp_paths_lock:
-                    temp = self._temp_paths.get(row_id)
-                if temp:
-                    Path(temp).unlink(missing_ok=True)
-                if not self._closing.is_set():
-                    self._dispatcher.row_status_changed.emit(row_id, SongStatus.SKIPPED.value)
-                self._on_folder_row_finished(row_id, SongStatus.SKIPPED.value)
-            else:
-                # Save path (D-09)
-                if not self._closing.is_set():
-                    self._dispatcher.row_status_changed.emit(row_id, SongStatus.SAVING.value)
-                with self._temp_paths_lock:
-                    temp = self._temp_paths[row_id]
-                final = Path(shutil.move(str(temp), str(result)))  # wrap str return (Pitfall 4)
-                self._saved_paths[row_id] = final
-                if not self._closing.is_set():
-                    self._dispatcher.row_status_changed.emit(row_id, SongStatus.UPLOADING.value)
-                self._on_folder_row_finished(row_id, SongStatus.UPLOADING.value)
-        except OSError as exc:
-            logging.getLogger(__name__).warning("Save failed row %d: %s", row_id, exc)
-            if not self._closing.is_set():
-                self._dispatcher.row_status_changed.emit(row_id, SongStatus.FAILED_SAVE.value)
-            self._on_folder_row_finished(row_id, SongStatus.FAILED_SAVE.value)
+        # Lock released — I/O and status updates handled by _show_folder_dialog on main thread.
 
     def _show_folder_dialog(self, row_id: int) -> None:
         """Main thread ONLY — connected to folder_requested via Qt queued connection. (D-03)
@@ -1148,8 +1132,7 @@ class TuneBridgeApp(QMainWindow):
         then performs the file I/O (move or skip) on the main thread.
         NEVER call this from a worker thread — dlg.exec() requires the main thread event loop (Pitfall 2).
         """
-        title_item = self.table._table.item(row_id, 0)
-        title = title_item.text() if title_item else f"Row {row_id}"
+        title = self.table.get_row_title(row_id)
 
         dlg = FolderConfirmDialog(
             song_title=title,
@@ -1182,7 +1165,13 @@ class TuneBridgeApp(QMainWindow):
                 if not self._closing.is_set():
                     self._dispatcher.row_status_changed.emit(row_id, SongStatus.SAVING.value)
                 with self._temp_paths_lock:
-                    temp = self._temp_paths[row_id]
+                    temp = self._temp_paths.get(row_id)
+                if temp is None:
+                    logging.getLogger(__name__).warning("No temp path for row %d", row_id)
+                    if not self._closing.is_set():
+                        self._dispatcher.row_status_changed.emit(row_id, SongStatus.FAILED_SAVE.value)
+                    self._on_folder_row_finished(row_id, SongStatus.FAILED_SAVE.value)
+                    return
                 final = Path(shutil.move(str(temp), str(result)))  # wrap str return (Pitfall 4)
                 self._saved_paths[row_id] = final
                 if not self._closing.is_set():
@@ -1316,6 +1305,10 @@ class TuneBridgeApp(QMainWindow):
         self._download_total   = len(jobs)
         self._download_done    = 0
         self._download_failed  = 0
+        self._folder_total     = 0
+        self._folder_done      = 0
+        self._folder_skipped   = 0
+        self._folder_failed    = 0
 
         # Connect batch-completion tracker (disconnect guard handled in _on_download_row_finished)
         self._dispatcher.row_status_changed.connect(self._on_download_row_finished)
