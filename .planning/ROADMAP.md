@@ -111,7 +111,7 @@ Plans:
 
 Plans:
 **Wave 0**
-- [ ] 05-01-PLAN.md — RED-gate test scaffold: 14 failing tests covering ORG-01 through ORG-04, D-04, D-08, D-11 (tests/test_organization.py)
+- [x] 05-01-PLAN.md — RED-gate test scaffold: 14 failing tests covering ORG-01 through ORG-04, D-04, D-08, D-11 (tests/test_organization.py)
 
 **Wave 1** *(blocked on Wave 0 completion)*
 - [ ] 05-02-PLAN.md — Static symbols: _dialog_lock (module-level), SongStatus.SKIPPED + FAILED_SAVE, _STATUS_COLORS additions, _Dispatcher signals, FolderConfirmDialog QDialog class
@@ -142,9 +142,9 @@ Plans:
 | 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
 | 3. Metadata Services | 4/4 | Complete | 2026-05-15 |
 | 4. Download Pipeline | 4/4 | Complete | 2026-05-16 |
-| 5. Organization | 0/4 | Not started | - |
+| 5. Organization | 1/4 | Executing | - |
 | 6. iBroadcast Upload | 0/? | Not started | - |
 
 ---
 
-*Last updated: 2026-05-17*
+*Last updated: 2026-05-17 — Phase 5 Plan 01 complete*
