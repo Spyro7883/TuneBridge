@@ -29,9 +29,12 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QDialog,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
     QSizePolicy,
@@ -148,6 +151,7 @@ QPushButton#start_btn:disabled {
 # ---------------------------------------------------------------------------
 
 _download_lock = threading.Lock()   # Serializes yt-dlp subprocess — browser cookie safety (D-07)
+_dialog_lock   = threading.Lock()   # Serializes folder dialogs — one at a time (D-01)
 _BROWSER_FALLBACKS: tuple[str, ...] = ("firefox", "chrome", "edge", "brave", "chromium", "opera")
 
 # WR-04: Both terminal-failure statuses that must trigger _on_row_failed callback
@@ -321,6 +325,8 @@ class SongStatus(Enum):
     FAILED          = "Failed"
     METADATA_READY  = "Metadata ready"
     FAILED_DOWNLOAD = "Failed — download"   # D-13: per-row download failure status
+    SKIPPED         = "Skipped — folder"    # D-05: user chose skip in FolderConfirmDialog
+    FAILED_SAVE     = "Failed — save"       # D-10: OSError during shutil.move
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +357,8 @@ def classify_url(url: str) -> str | None:
 class _Dispatcher(QObject):
     row_status_changed = Signal(int, str)
     metadata_ready     = Signal(int, object)   # (row_id, metadata_dict) — crosses thread boundary
+    folder_requested   = Signal(int)           # D-02: worker emits row_id; main thread shows dialog
+    folder_batch_done  = Signal()              # D-11: emitted when all folder dialogs resolve
 
     def __init__(self, table: "BatchTable"):
         super().__init__()
@@ -571,6 +579,8 @@ class BatchTable(QWidget):
         "Metadata ready":    QColor("#1DB954"),
         "Failed — metadata": QColor("#EF4444"),
         "Failed — download": QColor("#EF4444"),   # D-13
+        "Skipped — folder":  QColor("#B3B3B3"),   # D-05: gray, distinct from failure red
+        "Failed — save":     QColor("#EF4444"),   # D-10: matches other failure states
     }
 
     _TYPE_COLORS: dict[str, QColor] = {
