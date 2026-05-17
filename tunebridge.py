@@ -755,6 +755,77 @@ class PasteTextEdit(QTextEdit):
 
 
 # ---------------------------------------------------------------------------
+# Folder confirmation dialog (Phase 5, Wave 1)
+# ---------------------------------------------------------------------------
+
+
+class FolderConfirmDialog(QDialog):
+    """Modal dialog: user confirms or skips destination folder for one song. (D-15/D-16/D-17)
+
+    Call exec() on the main thread ONLY. Never instantiate from a worker thread.
+    Result via result_path() — returns confirmed Path or None (skip sentinel).
+    """
+
+    def __init__(self, song_title: str, proposed: Path | None, parent=None):
+        super().__init__(parent)
+        self.setModal(True)
+        self.setWindowTitle("Confirm Save Folder")
+        self._result_path: Path | None = None
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel(f"Save folder for: {song_title}"))
+
+        self._path_edit = QLineEdit(str(proposed) if proposed else "")
+        layout.addWidget(self._path_edit)
+
+        self._error_label = QLabel("")
+        self._error_label.setStyleSheet("color: #EF4444; font-size: 9pt;")
+        layout.addWidget(self._error_label)
+
+        browse_btn = QPushButton("Browse…")
+        browse_btn.clicked.connect(self._browse)
+        layout.addWidget(browse_btn)
+
+        btn_row = QHBoxLayout()
+        self._confirm_btn = QPushButton("Confirm")
+        self._confirm_btn.setEnabled(False)   # disabled until valid dir entered (D-16)
+        self._confirm_btn.clicked.connect(self._on_confirm)
+        skip_btn = QPushButton("Skip")
+        skip_btn.clicked.connect(self.reject)   # reject() → _result_path stays None (D-05)
+        btn_row.addWidget(self._confirm_btn)
+        btn_row.addWidget(skip_btn)
+        layout.addLayout(btn_row)
+
+        self._path_edit.textChanged.connect(self._validate)
+        self._validate(self._path_edit.text())   # set initial button state
+
+    def _validate(self, text: str) -> None:
+        # CRITICAL: check strip() != '' BEFORE is_dir() — Path('').is_dir() is True on Windows (Pitfall 1)
+        valid = bool(text.strip()) and Path(text.strip()).is_dir()
+        self._confirm_btn.setEnabled(valid)
+        if text.strip() and not valid:
+            self._error_label.setText("Folder not found — select an existing folder.")
+        else:
+            self._error_label.setText("")
+
+    def _browse(self) -> None:
+        """Open directory picker starting at current text or home. (D-17)"""
+        current = self._path_edit.text().strip()
+        start = current if (current and Path(current).is_dir()) else str(Path.home())
+        chosen = QFileDialog.getExistingDirectory(self, "Select folder", start)
+        if chosen:
+            self._path_edit.setText(chosen)
+
+    def _on_confirm(self) -> None:
+        self._result_path = Path(self._path_edit.text().strip())
+        self.accept()
+
+    def result_path(self) -> Path | None:
+        return self._result_path
+
+
+# ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
 
