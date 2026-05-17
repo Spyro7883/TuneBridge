@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import math
 import re
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.parse
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -312,6 +314,46 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
     return mp3s[0] if mp3s else None
 
 
+def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
+    """Return top N YouTube search results as {id, title, duration} dicts.
+
+    Uses yt-dlp --dump-json --flat-playlist — no download, metadata only.
+    duration is in seconds (float). Returns [] on any failure.
+    """
+    ytdlp = shutil.which("yt-dlp")
+    if not ytdlp:
+        return []
+    try:
+        result = subprocess.run(
+            [
+                ytdlp, "--dump-json", "--flat-playlist", "--no-playlist",
+                "--no-check-certificate", f"ytsearch{count}:{query}",
+            ],
+            capture_output=True, text=True, timeout=30,
+            encoding="utf-8", errors="replace",
+        )
+        candidates = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                info = json.loads(line)
+                vid_id = info.get("id", "")
+                if not vid_id:
+                    continue
+                candidates.append({
+                    "id":       vid_id,
+                    "title":    info.get("title", ""),
+                    "duration": float(info.get("duration") or 0),
+                })
+            except (json.JSONDecodeError, ValueError):
+                continue
+        return candidates
+    except Exception:
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Domain
 # ---------------------------------------------------------------------------
@@ -385,6 +427,32 @@ class ItunesClient:
     _OG_TITLE_RE = re.compile(r'<meta property="og:title" content="([^"]+)"')
     _OG_DESC_RE  = re.compile(r'<meta property="og:description" content="([^"]+)"')
     _HEADERS     = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+    def search_duration_ms(self, artist: str, title: str) -> int | None:
+        """Query iTunes Search API for track duration in milliseconds.
+
+        Free, no auth required. Used for YouTube duration-matching to pick the
+        correct video when ytsearch returns multiple candidates.
+        Returns None on any failure — callers fall back to ytsearch1:.
+        """
+        try:
+            term = urllib.parse.quote(f"{artist} {title}")
+            resp = requests.get(
+                f"https://itunes.apple.com/search?term={term}&entity=song&limit=5",
+                timeout=8,
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            if not results:
+                return None
+            artist_l, title_l = artist.lower(), title.lower()
+            for r in results:
+                if (artist_l in r.get("artistName", "").lower()
+                        and title_l in r.get("trackName", "").lower()):
+                    return r.get("trackTimeMillis")
+            return results[0].get("trackTimeMillis")
+        except Exception:
+            return None
 
     def get_metadata(self, spotify_url: str, resource_type: str) -> dict:
         """Return metadata dict for a Spotify URL (track or album)."""
@@ -1111,11 +1179,24 @@ class TuneBridgeApp(QMainWindow):
             row_tmp = self._session_tmp / uuid.uuid4().hex[:8]
             row_tmp.mkdir(parents=True, exist_ok=True)
 
-            # Route: Spotify uses ytsearch with Phase 3 metadata (D-01); YouTube uses direct URL (D-02)
+            # Route: Spotify uses ytsearch with duration matching; YouTube uses direct URL (D-01, D-02)
             if url_type == "Spotify":
                 artist = _sanitise_search_term(metadata.get("artist", ""))
                 title  = _sanitise_search_term(metadata.get("track_title", ""))
-                search_url = f"ytsearch:{artist} {title} audio"
+                query  = f"{artist} {title}"
+
+                # Duration-based matching: iTunes gives target_ms, ytsearch5 gives candidates
+                target_ms   = self._itunes_client.search_duration_ms(artist, title)
+                search_url  = f"ytsearch:{query} audio"   # fallback
+
+                if target_ms:
+                    candidates = _search_yt_candidates(query, count=5)
+                    if candidates:
+                        target_sec = target_ms / 1000.0
+                        best = min(candidates, key=lambda c: abs(c["duration"] - target_sec))
+                        # Only use duration match if within 30 s — avoids picking a live/remix
+                        if abs(best["duration"] - target_sec) <= 30:
+                            search_url = f"https://www.youtube.com/watch?v={best['id']}"
             else:
                 search_url = url
 
