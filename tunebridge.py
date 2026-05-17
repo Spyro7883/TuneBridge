@@ -778,14 +778,14 @@ class TuneBridgeApp(QMainWindow):
         cards_row = QHBoxLayout()
         cards_row.setSpacing(8)
         self._card_valid = StatCard(
-            label="Valide",
+            label="Valid",
             color_hex="#1DB954",
             sublabel="Spotify + YouTube",
         )
         self._card_invalid = StatCard(
-            label="Invalide",
+            label="Invalid",
             color_hex="#EF4444",
-            sublabel="URL-uri eronate",
+            sublabel="Invalid URLs",
         )
         cards_row.addWidget(self._card_valid)
         cards_row.addWidget(self._card_invalid)
