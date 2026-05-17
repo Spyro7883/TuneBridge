@@ -12,7 +12,7 @@
 - [x] **Phase 2: Input & Detection** — Paste area, URL type classification, type badges, inline per-row error display
 - [x] **Phase 3: Metadata Services** — Spotify Web API client, yt-dlp info extraction, "(guessed)" label convention
 - [x] **Phase 4: Download Pipeline** — Dual-path download (ytsearch vs direct), 432Hz retune toggle, audio-only MP3 output
-- [ ] **Phase 5: Organization** — Folder proposal logic, per-song folder confirmation dialog with threading.Event safety, skip support, file save
+- [x] **Phase 5: Organization** — Folder proposal logic, per-song folder confirmation dialog with threading.Event safety, skip support, file save
 - [ ] **Phase 6: iBroadcast Upload** — Auth, duplicate check, upload to iBroadcast after file save
 
 ---
@@ -117,10 +117,10 @@ Plans:
 - [x] 05-02-PLAN.md — Static symbols: _dialog_lock (module-level), SongStatus.SKIPPED + FAILED_SAVE, _STATUS_COLORS additions, _Dispatcher signals, FolderConfirmDialog QDialog class
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 05-03-PLAN.md — Threading wiring: Phase 5 __init__ vars, _folder_worker (lock+event+move), _show_folder_dialog slot, closeEvent extension, _on_download_row_finished submission
+- [x] 05-03-PLAN.md — Threading wiring: Phase 5 __init__ vars, _folder_worker (lock+event+move), _show_folder_dialog slot, closeEvent extension, _on_download_row_finished submission
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 05-04-PLAN.md — Batch completion: _on_folder_row_finished (counter + folder_batch_done signal + status bar summary) — 76+ tests GREEN
+- [x] 05-04-PLAN.md — Batch completion: _on_folder_row_finished (counter + folder_batch_done signal + status bar summary) — 76+ tests GREEN
 
 ### Phase 6: iBroadcast Upload
 **Goal**: Every saved song is automatically uploaded to iBroadcast, with duplicate protection preventing re-upload of already-present tracks
@@ -142,9 +142,9 @@ Plans:
 | 2. Input & Detection | 2/2 | Complete | 2026-05-13 |
 | 3. Metadata Services | 4/4 | Complete | 2026-05-15 |
 | 4. Download Pipeline | 4/4 | Complete | 2026-05-16 |
-| 5. Organization | 2/4 | Executing | - |
+| 5. Organization | 4/4 | Complete | 2026-05-17 |
 | 6. iBroadcast Upload | 0/? | Not started | - |
 
 ---
 
-*Last updated: 2026-05-17 — Phase 5 Plan 02 complete*
+*Last updated: 2026-05-17 — Phase 5 complete: 76/76 tests GREEN*
