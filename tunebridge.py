@@ -966,6 +966,7 @@ class TuneBridgeApp(QMainWindow):
             self._show_folder_dialog,
             Qt.ConnectionType.QueuedConnection,
         )
+        self._dispatcher.folder_batch_done.connect(self._unlock_ui)
 
         # Metadata clients — no credentials required
         self._itunes_client = ItunesClient()
@@ -1250,6 +1251,18 @@ class TuneBridgeApp(QMainWindow):
             self._dispatcher.row_status_changed.disconnect(self._on_download_row_finished)
         except RuntimeError:
             pass   # already disconnected
+
+        # Edge case: all downloads failed — no folder workers were submitted, so
+        # folder_batch_done will never fire. Unlock UI immediately.
+        if self._folder_total == 0:
+            self._unlock_ui()
+
+    def _unlock_ui(self) -> None:
+        """Re-enable paste area and Hz buttons after a batch fully completes."""
+        self._paste_box.setReadOnly(False)
+        self._btn_440.setEnabled(True)
+        self._btn_432.setEnabled(True)
+        self._paste_box.setFocus()
 
     def _refresh_start_button(self, _row_id: int = 0, _status: str = "") -> None:
         """Re-evaluate Start button enabled state. Must only run on main thread (D-02).
