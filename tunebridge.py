@@ -437,12 +437,16 @@ class ItunesClient:
         """
         try:
             term = urllib.parse.quote(f"{artist} {title}")
-            resp = requests.get(
-                f"https://itunes.apple.com/search?term={term}&entity=song&limit=5",
-                timeout=8,
-            )
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
+            # Try international store first, then US — covers non-English artists (e.g. Vicco/ES)
+            for store in ("&country=ES", ""):
+                resp = requests.get(
+                    f"https://itunes.apple.com/search?term={term}&entity=song&limit=5{store}",
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                results = resp.json().get("results", [])
+                if results:
+                    break
             if not results:
                 return None
             artist_l, title_l = artist.lower(), title.lower()
