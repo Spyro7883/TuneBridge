@@ -734,6 +734,46 @@ class BatchTable(QWidget):
         else:
             QTableWidget.keyPressEvent(self._table, event)
 
+    def remove_completed_rows(self) -> tuple[int, int]:
+        """Remove rows that are in a terminal completed state (processed batch).
+
+        Returns (valid_removed, invalid_removed) for stat card sync.
+        Called automatically when new URLs are pasted after a finished batch.
+        """
+        _COMPLETED = {
+            SongStatus.UPLOADING.value,
+            SongStatus.SKIPPED.value,
+            SongStatus.FAILED_SAVE.value,
+            SongStatus.FAILED_DOWNLOAD.value,
+        }
+        _INVALID_COMPLETED = {SongStatus.FAILED_METADATA.value} if hasattr(SongStatus, "FAILED_METADATA") else set()
+        rows_to_remove = sorted(
+            [
+                r for r in range(self._table.rowCount())
+                if (item := self._table.item(r, 2))
+                and item.text() in _COMPLETED | _INVALID_COMPLETED
+            ],
+            reverse=True,
+        )
+        if not rows_to_remove:
+            return 0, 0
+        invalid_removed = sum(
+            1 for r in rows_to_remove
+            if (item := self._table.item(r, 2)) and item.text() in _INVALID_COMPLETED
+        )
+        valid_removed = len(rows_to_remove) - invalid_removed
+        for row in rows_to_remove:
+            self._table.removeRow(row)
+        self._rows = {
+            i: url
+            for i, url in enumerate(
+                self._rows[r] for r in sorted(self._rows) if r not in rows_to_remove
+            )
+        }
+        if self._on_rows_removed:
+            self._on_rows_removed(valid_removed, invalid_removed)
+        return valid_removed, invalid_removed
+
     def clear(self) -> None:
         self._table.setRowCount(0)
         self._rows.clear()
@@ -979,6 +1019,9 @@ class TuneBridgeApp(QMainWindow):
         candidates = [line for line in lines if line]
         if not candidates:
             return
+
+        # Clear finished rows from previous batch before adding new ones
+        self.table.remove_completed_rows()
 
         valid_count = 0
         invalid_count = 0
