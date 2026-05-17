@@ -427,6 +427,8 @@ class YoutubeExtractor:
         "no_warnings": True,
         "extract_flat": False,
         "noplaylist": True,
+        "nocheckcertificate": True,
+        "js_runtimes": {"node": {}},
     }
 
     def extract_metadata(self, url: str) -> dict:
