@@ -450,7 +450,9 @@ class ItunesClient:
                 if (artist_l in r.get("artistName", "").lower()
                         and title_l in r.get("trackName", "").lower()):
                     return r.get("trackTimeMillis")
-            return results[0].get("trackTimeMillis")
+            # No confident match — return None so caller falls back to ytsearch1:
+            # Returning results[0] duration risks biasing toward the wrong song.
+            return None
         except Exception:
             return None
 
@@ -1186,17 +1188,28 @@ class TuneBridgeApp(QMainWindow):
                 query  = f"{artist} {title}"
 
                 # Duration-based matching: iTunes gives target_ms, ytsearch5 gives candidates
+                _log = logging.getLogger(__name__)
                 target_ms   = self._itunes_client.search_duration_ms(artist, title)
                 search_url  = f"ytsearch:{query} audio"   # fallback
 
                 if target_ms:
+                    target_sec = target_ms / 1000.0
                     candidates = _search_yt_candidates(query, count=5)
+                    _log.info("Duration match: target=%.1fs, candidates=%d for %r",
+                              target_sec, len(candidates), query)
                     if candidates:
-                        target_sec = target_ms / 1000.0
                         best = min(candidates, key=lambda c: abs(c["duration"] - target_sec))
+                        diff = abs(best["duration"] - target_sec)
+                        _log.info("Best candidate: %r dur=%.1fs diff=%.1fs",
+                                  best["title"], best["duration"], diff)
                         # Only use duration match if within 30 s — avoids picking a live/remix
-                        if abs(best["duration"] - target_sec) <= 30:
+                        if diff <= 30:
                             search_url = f"https://www.youtube.com/watch?v={best['id']}"
+                            _log.info("Using duration-matched URL: %s", search_url)
+                        else:
+                            _log.warning("Best candidate diff %.1fs > 30s, falling back", diff)
+                else:
+                    _log.warning("iTunes returned no duration for %r, using ytsearch fallback", query)
             else:
                 search_url = url
 
@@ -1297,6 +1310,9 @@ class TuneBridgeApp(QMainWindow):
                         self._dispatcher.row_status_changed.emit(row_id, SongStatus.FAILED_SAVE.value)
                     self._on_folder_row_finished(row_id, SongStatus.FAILED_SAVE.value)
                     return
+                # Windows: shutil.move raises if dest_dir/filename already exists — remove first
+                dest_candidate = Path(result) / Path(temp).name
+                dest_candidate.unlink(missing_ok=True)
                 final = Path(shutil.move(str(temp), str(result)))  # wrap str return (Pitfall 4)
                 self._saved_paths[row_id] = final
                 if not self._closing.is_set():
