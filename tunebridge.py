@@ -147,7 +147,8 @@ QPushButton#start_btn:disabled {
 # Download infrastructure (Phase 4)
 # ---------------------------------------------------------------------------
 
-_download_lock = threading.Lock()   # Serializes yt-dlp subprocess — Firefox cookie safety (D-07)
+_download_lock = threading.Lock()   # Serializes yt-dlp subprocess — browser cookie safety (D-07)
+_BROWSER_FALLBACKS: tuple[str, ...] = ("firefox", "chrome", "edge", "brave", "chromium", "opera")
 
 # WR-04: Both terminal-failure statuses that must trigger _on_row_failed callback
 FAILURE_STATUSES: frozenset[str] = frozenset({"Failed — metadata", "Failed — download"})
@@ -236,25 +237,32 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
     """Download audio via yt-dlp to out_dir. Serialized via _download_lock (D-07).
 
     search_url is either a ytsearch: string (Spotify rows) or a direct YouTube URL.
-    Spotify routing is done in _download_worker — this function is URL-agnostic.
-    CRITICAL: _download_lock wraps entire Popen+wait cycle — do NOT narrow scope.
+    Tries player_client=ios first (no cookies, bypasses n-challenge), then falls back
+    through _BROWSER_FALLBACKS. CRITICAL: _download_lock wraps entire cycle — do NOT narrow.
     """
     ytdlp = shutil.which("yt-dlp")
     if not ytdlp:
         raise RuntimeError("yt-dlp not found. Install: pip install yt-dlp")
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [
+
+    base_cmd = [
         ytdlp, "--no-playlist",
-        "--no-check-certificate",          # Windows SSL proxy/AV interception workaround
-        "--cookies-from-browser", "firefox",
+        "--no-check-certificate",
+        "--js-runtimes", "node",               # Node.js required for YouTube n-challenge (EJS)
         "-x", "--audio-format", "mp3", "--audio-quality", "192K",
         "-o", str(out_dir / "%(title)s.%(ext)s"),
         search_url,
     ]
 
-    with _download_lock:
-        process = subprocess.Popen(
+    # Try each browser in order; fall back to no-cookies last
+    cookie_variants: list[list[str]] = [
+        ["--cookies-from-browser", b] for b in _BROWSER_FALLBACKS
+    ] + [[]]
+
+    def _run_attempt(cmd: list[str]) -> tuple[bool, int]:
+        timed_out = False
+        proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -263,23 +271,34 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
             errors="replace",
         )
 
-        def _kill_if_stuck() -> None:
+        def _kill() -> None:
+            nonlocal timed_out
             try:
-                if process.poll() is None:
-                    process.kill()
+                if proc.poll() is None:
+                    timed_out = True
+                    proc.kill()
             except Exception:
                 pass
 
-        timer = threading.Timer(600, _kill_if_stuck)
+        timer = threading.Timer(600, _kill)
         timer.start()
         try:
-            process.stdout.read()   # drain — status updates go via dispatcher signals
-            process.wait()
+            proc.stdout.read()
+            proc.wait()
         finally:
             timer.cancel()
+        return timed_out, proc.returncode
 
-        if process.returncode != 0:
-            raise RuntimeError("yt-dlp download failed or timed out.")
+    with _download_lock:
+        for cookie_args in cookie_variants:
+            cmd = [base_cmd[0]] + cookie_args + base_cmd[1:]
+            timed_out, rc = _run_attempt(cmd)
+            if timed_out:
+                raise RuntimeError("yt-dlp download timed out.")
+            if rc == 0:
+                break
+        else:
+            raise RuntimeError("yt-dlp download failed on all browser configurations.")
 
     mp3s = sorted(out_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
     return mp3s[0] if mp3s else None
