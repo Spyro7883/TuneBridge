@@ -311,3 +311,85 @@ def test_batch_table_update_row_metadata_youtube_label_round_trip(window):
     assert url_item is not None
     assert "Artist" in url_item.text()
     assert "Song" in url_item.text()
+
+
+# ---------------------------------------------------------------------------
+# ItunesClient.search_duration_ms — duration-based YouTube matching
+# ---------------------------------------------------------------------------
+
+
+def _itunes_resp(results: list) -> MagicMock:
+    m = MagicMock()
+    m.raise_for_status = MagicMock()
+    m.json.return_value = {"results": results}
+    return m
+
+
+def test_search_duration_ms_simple_match():
+    """search_duration_ms returns trackTimeMillis when artist and title match exactly."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get", return_value=_itunes_resp([{
+        "artistName": "Vicco",
+        "trackName": "Volver a Nacer",
+        "trackTimeMillis": 190000,
+    }])):
+        assert client.search_duration_ms("Vicco", "Volver a Nacer") == 190000
+
+
+def test_search_duration_ms_collaboration_first_artist_matches():
+    """'TINI, Cali Y El Dandee' matches when iTunes artistName is only 'TINI'."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get", return_value=_itunes_resp([{
+        "artistName": "TINI",
+        "trackName": "Por Que Te Vas",
+        "trackTimeMillis": 195000,
+    }])):
+        result = client.search_duration_ms("TINI, Cali Y El Dandee", "Por Qué Te Vas")
+    assert result == 195000
+
+
+def test_search_duration_ms_accented_title_normalized():
+    """'Por Qué Te Vas' (accent) matches iTunes 'Por Que Te Vas' via unicode normalization."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get", return_value=_itunes_resp([{
+        "artistName": "TINI",
+        "trackName": "Por Que Te Vas",
+        "trackTimeMillis": 195000,
+    }])):
+        result = client.search_duration_ms("TINI", "Por Qué Te Vas")
+    assert result == 195000
+
+
+def test_search_duration_ms_no_match_returns_none():
+    """Returns None when no iTunes result matches artist+title."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get", return_value=_itunes_resp([{
+        "artistName": "Other Artist",
+        "trackName": "Other Song",
+        "trackTimeMillis": 200000,
+    }])):
+        assert client.search_duration_ms("TINI", "Por Qué Te Vas") is None
+
+
+def test_search_duration_ms_empty_results_returns_none():
+    """Returns None when all stores return empty results."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get", return_value=_itunes_resp([])):
+        assert client.search_duration_ms("Unknown", "Unknown") is None
+
+
+def test_search_duration_ms_tries_mx_store():
+    """ES, MX, and US stores are all tried when earlier stores return empty."""
+    client = ItunesClient()
+    urls_called = []
+
+    def fake_get(url, **kwargs):
+        urls_called.append(url)
+        return _itunes_resp([])
+
+    with patch("tunebridge.requests.get", side_effect=fake_get):
+        client.search_duration_ms("Artist", "Title")
+
+    assert any("country=ES" in u for u in urls_called), "ES store not tried"
+    assert any("country=MX" in u for u in urls_called), "MX store not tried"
+    assert any("country=ES" not in u and "country=MX" not in u for u in urls_called), "US fallback not tried"
