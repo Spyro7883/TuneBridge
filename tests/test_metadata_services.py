@@ -393,3 +393,48 @@ def test_search_duration_ms_tries_mx_store():
     assert any("country=ES" in u for u in urls_called), "ES store not tried"
     assert any("country=MX" in u for u in urls_called), "MX store not tried"
     assert any("country=ES" not in u and "country=MX" not in u for u in urls_called), "US fallback not tried"
+
+
+def test_search_duration_ms_falls_back_to_deezer():
+    """When iTunes finds no match, Deezer API is queried as fallback."""
+    client = ItunesClient()
+
+    def fake_get(url, **kwargs):
+        if "itunes.apple.com" in url:
+            return _itunes_resp([])
+        # Deezer response
+        m = MagicMock()
+        m.raise_for_status = MagicMock()
+        m.json.return_value = {"data": [{
+            "title": "Song Alpha",
+            "artist": {"name": "Artist One"},
+            "duration": 195,
+        }]}
+        return m
+
+    with patch("tunebridge.requests.get", side_effect=fake_get):
+        result = client.search_duration_ms("Artist One", "Song Alpha")
+
+    assert result == 195_000
+
+
+def test_search_duration_ms_deezer_skipped_when_itunes_matches():
+    """Deezer is NOT called when iTunes already returns a match."""
+    client = ItunesClient()
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        if "itunes.apple.com" in url:
+            return _itunes_resp([{
+                "artistName": "Artist One",
+                "trackName": "Song Alpha",
+                "trackTimeMillis": 190_000,
+            }])
+        return _itunes_resp([])
+
+    with patch("tunebridge.requests.get", side_effect=fake_get):
+        result = client.search_duration_ms("Artist One", "Song Alpha")
+
+    assert result == 190_000
+    assert not any("deezer.com" in u for u in calls), "Deezer called unnecessarily"

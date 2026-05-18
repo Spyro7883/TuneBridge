@@ -473,7 +473,87 @@ class ItunesClient:
                 )
                 if artist_match and title_n in r_title:
                     return r.get("trackTimeMillis")
-            # No confident match — return None so caller falls back to ytsearch1:
+            return None
+        except Exception:
+            return None
+
+    def _deezer_duration_ms(self, artist: str, title: str) -> int | None:
+        """Fallback duration lookup via Deezer public API (no auth required).
+
+        Broader catalog than iTunes — covers tracks missing from iTunes stores.
+        Returns duration in milliseconds, or None on any failure.
+        """
+        try:
+            term = urllib.parse.quote(f"{artist} {title}")
+            resp = requests.get(
+                f"https://api.deezer.com/search?q={term}&limit=5",
+                timeout=8,
+            )
+            resp.raise_for_status()
+            tracks = resp.json().get("data", [])
+            if not tracks:
+                return None
+
+            title_n = _norm_str(title)
+            artist_variants = [_norm_str(artist)]
+            if "," in artist:
+                artist_variants.append(_norm_str(artist.split(",")[0].strip()))
+
+            for t in tracks:
+                r_artist = _norm_str(t.get("artist", {}).get("name", ""))
+                r_title  = _norm_str(t.get("title", ""))
+                artist_match = any(
+                    v in r_artist or r_artist in v for v in artist_variants
+                )
+                if artist_match and title_n in r_title:
+                    return int(t["duration"]) * 1000   # Deezer returns seconds
+            return None
+        except Exception:
+            return None
+
+    def search_duration_ms(self, artist: str, title: str) -> int | None:
+        """Return track duration in milliseconds from iTunes, with Deezer fallback.
+
+        Tries iTunes (ES/MX/US stores) first; falls back to Deezer public API
+        for tracks absent from iTunes catalog.
+        """
+        result = self._itunes_duration_ms(artist, title)
+        if result is None:
+            result = self._deezer_duration_ms(artist, title)
+        return result
+
+    def _itunes_duration_ms(self, artist: str, title: str) -> int | None:
+        """Query iTunes Search API for track duration. Returns ms or None."""
+        try:
+            term = urllib.parse.quote(f"{artist} {title}")
+            results: list = []
+            # ES/MX stores first for broader international coverage, then US
+            for store in ("&country=ES", "&country=MX", ""):
+                resp = requests.get(
+                    f"https://itunes.apple.com/search?term={term}&entity=song&limit=5{store}",
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                results = resp.json().get("results", [])
+                if results:
+                    break
+            if not results:
+                return None
+
+            title_n = _norm_str(title)
+            # For collaboration credits like "Artist A, Artist B", also try first artist only
+            artist_variants = [_norm_str(artist)]
+            if "," in artist:
+                artist_variants.append(_norm_str(artist.split(",")[0].strip()))
+
+            for r in results:
+                r_artist = _norm_str(r.get("artistName", ""))
+                r_title  = _norm_str(r.get("trackName", ""))
+                artist_match = any(
+                    v in r_artist or r_artist in v for v in artist_variants
+                )
+                if artist_match and title_n in r_title:
+                    return r.get("trackTimeMillis")
             return None
         except Exception:
             return None
@@ -1261,7 +1341,7 @@ class TuneBridgeApp(QMainWindow):
                                 tolerance, query,
                             )
                 else:
-                    _log.warning("iTunes returned no duration for %r, using ytsearch fallback", query)
+                    _log.warning("No duration found (iTunes + Deezer) for %r, using ytsearch fallback", query)
             else:
                 search_url = url
 
