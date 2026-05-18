@@ -322,12 +322,14 @@ def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
     try:
         encoded = urllib.parse.quote_plus(query)
         search_url = f"https://music.youtube.com/search?q={encoded}"
+        import os as _os
         result = subprocess.run(
             [ytdlp, "--playlist-end", str(count), "--no-check-certificate", "--no-warnings",
-             "--print", "%(id)s|||%(title)s|||%(duration)s|||%(channel)s",
+             "--print", "%(id)s|||%(title)s|||%(duration)s|||%(channel)s|||%(view_count)s",
              search_url],
             capture_output=True, text=True, timeout=30,
             encoding="utf-8", errors="replace",
+            env={**_os.environ, "PYTHONUTF8": "1"},
         )
         candidates = []
         for line in result.stdout.strip().splitlines():
@@ -341,11 +343,16 @@ def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
                 duration = float(parts[2].strip())
             except ValueError:
                 duration = 0.0
+            try:
+                views = int(parts[4].strip()) if len(parts) > 4 else 0
+            except ValueError:
+                views = 0
             candidates.append({
-                "id":       vid_id,
-                "title":    parts[1].strip(),
-                "channel":  parts[3].strip() if len(parts) > 3 else "",
-                "duration": duration,
+                "id":        vid_id,
+                "title":     parts[1].strip(),
+                "channel":   parts[3].strip() if len(parts) > 3 else "",
+                "duration":  duration,
+                "view_count": views,
             })
         return candidates
     except Exception:
@@ -381,12 +388,21 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
 
         if title_l in vid_l:
             score += 5.0
+        # Weak signal: official YT Music songs often have simple titles without artist prefix
         if artist_key and artist_key in vid_l:
-            score += 3.0
+            score += 1.0
         if artist_key and artist_key in c.get("channel", "").lower():
             score += 3.0
-        # Penalise lyric/letra videos — not clean audio
-        if any(kw in vid_l for kw in ("letra", "lyrics", "lyric video", "karaoke")):
+        # View count: strong signal for official releases vs fan uploads (log scale, cap 9)
+        views = c.get("view_count", 0) or 0
+        if views > 0:
+            score += min(math.log10(views) * 1.5, 9.0)
+        # Penalise non-original versions
+        if any(kw in vid_l for kw in (
+            "letra", "lyrics", "lyric video", "karaoke",
+            "bass boosted", "sped up", "slowed", "nightcore",
+            "8d audio", "reverb", "pitched",
+        )):
             score -= 3.0
 
         scored.append((score, c))
