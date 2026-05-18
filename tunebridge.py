@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import unicodedata
 import urllib.parse
 import uuid
 from collections.abc import Callable
@@ -165,11 +164,6 @@ FAILURE_STATUSES: frozenset[str] = frozenset({
 })
 
 
-def _norm_str(s: str) -> str:
-    """Lowercase + strip accents for fuzzy matching ('Qué' → 'que')."""
-    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
-
-
 def _sanitise_search_term(s: str) -> str:
     """Strip control chars and leading dashes from scraped metadata before ytsearch: query."""
     s = re.sub(r"[\x00-\x1f\x7f]", " ", s)
@@ -320,47 +314,30 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
     return mp3s[0] if mp3s else None
 
 
-def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
-    """Return top N YouTube search results as {id, title, duration, channel} dicts.
+def _download_with_spotdl(spotify_url: str, out_dir: Path) -> Path | None:
+    """Download a Spotify track via spotDL (uses YouTube Music + ISRC internally).
 
-    Searches for "{query} audio" to prefer audio uploads over music videos.
-    Includes channel name so callers can prefer YouTube Music Topic channels
-    (auto-generated, studio-quality audio — channel name ends with " - Topic").
-    duration is in seconds (float). Returns [] on any failure.
+    Serialized via _download_lock — same as download_track_for_row.
+    Returns the downloaded .mp3 path or None if spotDL is unavailable or fails.
     """
-    ytdlp = shutil.which("yt-dlp")
-    if not ytdlp:
-        return []
-    try:
-        result = subprocess.run(
-            [
-                ytdlp, "--dump-json", "--flat-playlist", "--no-playlist",
-                "--no-check-certificate", f"ytsearch{count}:{query} audio",
-            ],
-            capture_output=True, text=True, timeout=30,
-            encoding="utf-8", errors="replace",
-        )
-        candidates = []
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                info = json.loads(line)
-                vid_id = info.get("id", "")
-                if not vid_id:
-                    continue
-                candidates.append({
-                    "id":       vid_id,
-                    "title":    info.get("title", ""),
-                    "duration": float(info.get("duration") or 0),
-                    "channel":  info.get("channel", "") or info.get("uploader", ""),
-                })
-            except (json.JSONDecodeError, ValueError):
-                continue
-        return candidates
-    except Exception:
-        return []
+    spotdl_bin = shutil.which("spotdl")
+    if not spotdl_bin:
+        return None
+    with _download_lock:
+        try:
+            subprocess.run(
+                [spotdl_bin, "download", spotify_url,
+                 "--output", str(out_dir),
+                 "--format", "mp3",
+                 "--bitrate", "auto",
+                 "--log-level", "WARNING"],
+                capture_output=True, text=True, timeout=180,
+                encoding="utf-8", errors="replace",
+            )
+        except Exception:
+            return None
+    mp3s = sorted(out_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return mp3s[0] if mp3s else None
 
 
 # ---------------------------------------------------------------------------
@@ -446,87 +423,6 @@ class ItunesClient:
         """
         try:
             term = urllib.parse.quote(f"{artist} {title}")
-            # ES/MX stores first for broader international coverage, then US
-            for store in ("&country=ES", "&country=MX", ""):
-                resp = requests.get(
-                    f"https://itunes.apple.com/search?term={term}&entity=song&limit=5{store}",
-                    timeout=8,
-                )
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
-                if results:
-                    break
-            if not results:
-                return None
-
-            title_n = _norm_str(title)
-            # For collaboration credits like "Artist A, Artist B", also try first artist only
-            artist_variants = [_norm_str(artist)]
-            if "," in artist:
-                artist_variants.append(_norm_str(artist.split(",")[0].strip()))
-
-            for r in results:
-                r_artist = _norm_str(r.get("artistName", ""))
-                r_title  = _norm_str(r.get("trackName", ""))
-                artist_match = any(
-                    v in r_artist or r_artist in v for v in artist_variants
-                )
-                if artist_match and title_n in r_title:
-                    return r.get("trackTimeMillis")
-            return None
-        except Exception:
-            return None
-
-    def _deezer_duration_ms(self, artist: str, title: str) -> int | None:
-        """Fallback duration lookup via Deezer public API (no auth required).
-
-        Broader catalog than iTunes — covers tracks missing from iTunes stores.
-        Returns duration in milliseconds, or None on any failure.
-        """
-        try:
-            term = urllib.parse.quote(f"{artist} {title}")
-            resp = requests.get(
-                f"https://api.deezer.com/search?q={term}&limit=5",
-                timeout=8,
-            )
-            resp.raise_for_status()
-            tracks = resp.json().get("data", [])
-            if not tracks:
-                return None
-
-            title_n = _norm_str(title)
-            artist_variants = [_norm_str(artist)]
-            if "," in artist:
-                artist_variants.append(_norm_str(artist.split(",")[0].strip()))
-
-            for t in tracks:
-                r_artist = _norm_str(t.get("artist", {}).get("name", ""))
-                r_title  = _norm_str(t.get("title", ""))
-                artist_match = any(
-                    v in r_artist or r_artist in v for v in artist_variants
-                )
-                if artist_match and title_n in r_title:
-                    return int(t["duration"]) * 1000   # Deezer returns seconds
-            return None
-        except Exception:
-            return None
-
-    def search_duration_ms(self, artist: str, title: str) -> int | None:
-        """Return track duration in milliseconds from iTunes, with Deezer fallback.
-
-        Tries iTunes (ES/MX/US stores) first; falls back to Deezer public API
-        for tracks absent from iTunes catalog.
-        """
-        result = self._itunes_duration_ms(artist, title)
-        if result is None:
-            result = self._deezer_duration_ms(artist, title)
-        return result
-
-    def _itunes_duration_ms(self, artist: str, title: str) -> int | None:
-        """Query iTunes Search API for track duration. Returns ms or None."""
-        try:
-            term = urllib.parse.quote(f"{artist} {title}")
-            results: list = []
             # ES/MX stores first for broader international coverage, then US
             for store in ("&country=ES", "&country=MX", ""):
                 resp = requests.get(
@@ -1271,8 +1167,8 @@ class TuneBridgeApp(QMainWindow):
         """Worker thread: download + optional retune. Per-row error isolation.
 
         Mirrors _metadata_worker exactly: closing guard → try/except → emit signal.
-        _download_lock is acquired inside download_track_for_row — never here.
-        Routing: Spotify → ytsearch:{artist} {title} audio; YouTube → direct URL (D-01, D-02).
+        Routing: Spotify → spotDL (YouTube Music/ISRC) with ytsearch fallback;
+                 YouTube → direct URL (D-01, D-02).
         """
         if self._closing.is_set():
             return
@@ -1283,69 +1179,21 @@ class TuneBridgeApp(QMainWindow):
             row_tmp = self._session_tmp / uuid.uuid4().hex[:8]
             row_tmp.mkdir(parents=True, exist_ok=True)
 
-            # Route: Spotify uses ytsearch with duration matching; YouTube uses direct URL (D-01, D-02)
+            _log = logging.getLogger(__name__)
             if url_type == "Spotify":
-                artist = _sanitise_search_term(metadata.get("artist", ""))
-                title  = _sanitise_search_term(metadata.get("track_title", ""))
-                # Title-first gives better YouTube relevance for official audio
-                query  = f"{title} {artist}"
-
-                # Duration-based matching: iTunes gives target_ms, ytsearch8 gives candidates
-                _log = logging.getLogger(__name__)
-                target_ms   = self._itunes_client.search_duration_ms(artist, title)
-                search_url  = f"ytsearch:{query} audio"   # fallback
-
-                if target_ms:
-                    target_sec = target_ms / 1000.0
-                    # 6% of duration, min 8s — prevents matching a different song with similar length
-                    tolerance  = max(8.0, target_sec * 0.06)
-                    candidates = _search_yt_candidates(query, count=8)
-                    _log.info("Duration match: target=%.1fs tol=%.1fs candidates=%d for %r",
-                              target_sec, tolerance, len(candidates), query)
-                    if candidates:
-                        within = [c for c in candidates
-                                  if abs(c["duration"] - target_sec) <= tolerance]
-                        if within:
-                            a_n = _norm_str(artist.split(",")[0].strip())
-                            t_n = _norm_str(title)
-                            # Candidates that contain BOTH artist AND title in video title
-                            title_hits = [
-                                c for c in within
-                                if a_n in _norm_str(c.get("title", ""))
-                                and t_n in _norm_str(c.get("title", ""))
-                            ]
-                            # If no title-confirmed hit, skip duration match entirely —
-                            # picking a wrong song with a similar duration is worse than
-                            # falling back to ytsearch1: (search_url stays as set above).
-                            if title_hits:
-                                # Among confirmed hits prefer Topic channels (official studio
-                                # master), then closest duration.
-                                best = min(title_hits, key=lambda c: (
-                                    not c.get("channel", "").lower().endswith(" - topic"),
-                                    abs(c["duration"] - target_sec),
-                                ))
-                                diff = abs(best["duration"] - target_sec)
-                                search_url = f"https://www.youtube.com/watch?v={best['id']}"
-                                _log.info("Duration-matched: %r ch=%r dur=%.1fs diff=%.1fs",
-                                          best["title"], best.get("channel", ""),
-                                          best["duration"], diff)
-                            else:
-                                _log.warning(
-                                    "No title-confirmed candidate for %r — skipping duration "
-                                    "match, falling back to ytsearch",
-                                    query,
-                                )
-                        else:
-                            _log.warning(
-                                "No candidate within %.1fs tolerance for %r, falling back",
-                                tolerance, query,
-                            )
-                else:
-                    _log.warning("No duration found (iTunes + Deezer) for %r, using ytsearch fallback", query)
+                # spotDL matches via ISRC — most accurate for Spotify URLs
+                downloaded = _download_with_spotdl(url, row_tmp)
+                if not downloaded:
+                    # spotDL unavailable or failed — fall back to basic ytsearch
+                    artist = _sanitise_search_term(metadata.get("artist", ""))
+                    title  = _sanitise_search_term(metadata.get("track_title", ""))
+                    _log.warning("spotDL unavailable/failed, using ytsearch for %r",
+                                 f"{title} {artist}")
+                    downloaded = download_track_for_row(
+                        f"ytsearch:{title} {artist} audio", row_tmp
+                    )
             else:
-                search_url = url
-
-            downloaded = download_track_for_row(search_url, row_tmp)
+                downloaded = download_track_for_row(url, row_tmp)
             if not downloaded:
                 raise RuntimeError("No audio file found after yt-dlp download.")
 

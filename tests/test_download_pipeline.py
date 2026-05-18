@@ -18,6 +18,7 @@ from tunebridge import (
     TuneBridgeApp,
     SongStatus,
     _download_lock,
+    _download_with_spotdl,
     download_track_for_row,
     retune_file,
 )
@@ -45,20 +46,52 @@ def window(qapp):
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_spotify_search_query_uses_title_then_artist(window):
-    """DL-01: Spotify path builds ytsearch:{title} {artist} audio (title-first for relevance)."""
+def test_spotify_uses_spotdl_when_available(window):
+    """DL-01: Spotify path calls _download_with_spotdl with the original Spotify URL."""
     metadata = {"artist": "Portishead", "track_title": "Glory Box", "source": "Spotify"}
     fake_mp3 = window._session_tmp / "abcdef12" / "track.mp3"
-    with patch("tunebridge.download_track_for_row") as mock_dl, \
-         patch("pathlib.Path.mkdir"):
-        mock_dl.return_value = fake_mp3
-        with patch("tunebridge.uuid.uuid4") as mock_uuid:
-            mock_uuid.return_value.hex = "abcdef1234567890"
-            window._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 440)
-        called_url = mock_dl.call_args[0][0]
-        assert called_url == "ytsearch:Glory Box Portishead audio", (
-            f"Expected title-first ytsearch query, got: {called_url!r}"
-        )
+    spotify_url = "https://open.spotify.com/track/abc"
+    with patch("tunebridge._download_with_spotdl", return_value=fake_mp3) as mock_spotdl, \
+         patch("pathlib.Path.mkdir"), \
+         patch("tunebridge.uuid.uuid4") as mock_uuid:
+        mock_uuid.return_value.hex = "abcdef1234567890"
+        window._download_worker(0, spotify_url, "Spotify", metadata, 440)
+    mock_spotdl.assert_called_once_with(spotify_url, window._session_tmp / "abcdef12")
+
+
+def test_spotify_falls_back_to_ytsearch_when_spotdl_unavailable(window):
+    """DL-01b: When spotDL returns None, ytsearch fallback is used."""
+    metadata = {"artist": "Portishead", "track_title": "Glory Box", "source": "Spotify"}
+    fake_mp3 = window._session_tmp / "abcdef12" / "track.mp3"
+    with patch("tunebridge._download_with_spotdl", return_value=None), \
+         patch("tunebridge.download_track_for_row", return_value=fake_mp3) as mock_dl, \
+         patch("pathlib.Path.mkdir"), \
+         patch("tunebridge.uuid.uuid4") as mock_uuid:
+        mock_uuid.return_value.hex = "abcdef1234567890"
+        window._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 440)
+    called_url = mock_dl.call_args[0][0]
+    assert called_url.startswith("ytsearch:"), f"Expected ytsearch fallback, got: {called_url!r}"
+
+
+def test_download_with_spotdl_returns_none_when_not_installed(tmp_path):
+    """_download_with_spotdl returns None immediately when spotDL binary not found."""
+    with patch("tunebridge.shutil.which", return_value=None):
+        result = _download_with_spotdl("https://open.spotify.com/track/abc", tmp_path)
+    assert result is None
+
+
+def test_download_with_spotdl_returns_mp3_on_success(tmp_path):
+    """_download_with_spotdl returns the produced MP3 path when spotDL succeeds."""
+    fake_mp3 = tmp_path / "Artist - Song.mp3"
+    fake_mp3.write_bytes(b"fake")
+
+    def fake_run(cmd, **kwargs):
+        pass  # spotDL already wrote the file above
+
+    with patch("tunebridge.shutil.which", return_value="/usr/bin/spotdl"), \
+         patch("tunebridge.subprocess.run", side_effect=fake_run):
+        result = _download_with_spotdl("https://open.spotify.com/track/abc", tmp_path)
+    assert result == fake_mp3
 
 
 def test_download_worker_spotify_path_calls_ytsearch(window):
