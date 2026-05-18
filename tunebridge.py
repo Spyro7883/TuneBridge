@@ -165,6 +165,11 @@ FAILURE_STATUSES: frozenset[str] = frozenset({
 })
 
 
+def _norm_str(s: str) -> str:
+    """Lowercase + strip accents for fuzzy matching ('Qué' → 'que')."""
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+
+
 def _sanitise_search_term(s: str) -> str:
     """Strip control chars and leading dashes from scraped metadata before ytsearch: query."""
     s = re.sub(r"[\x00-\x1f\x7f]", " ", s)
@@ -439,10 +444,6 @@ class ItunesClient:
         correct video when ytsearch returns multiple candidates.
         Returns None on any failure — callers fall back to ytsearch1:.
         """
-        def _norm(s: str) -> str:
-            """Lowercase + strip accents (e.g. 'Qué' → 'que')."""
-            return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
-
         try:
             term = urllib.parse.quote(f"{artist} {title}")
             # ES/MX first for Latin artists (Vicco, TINI, Bad Bunny), then US
@@ -458,15 +459,15 @@ class ItunesClient:
             if not results:
                 return None
 
-            title_n = _norm(title)
+            title_n = _norm_str(title)
             # For collaborations like "TINI, Cali Y El Dandee", also try first artist only
-            artist_variants = [_norm(artist)]
+            artist_variants = [_norm_str(artist)]
             if "," in artist:
-                artist_variants.append(_norm(artist.split(",")[0].strip()))
+                artist_variants.append(_norm_str(artist.split(",")[0].strip()))
 
             for r in results:
-                r_artist = _norm(r.get("artistName", ""))
-                r_title  = _norm(r.get("trackName", ""))
+                r_artist = _norm_str(r.get("artistName", ""))
+                r_title  = _norm_str(r.get("trackName", ""))
                 artist_match = any(
                     v in r_artist or r_artist in v for v in artist_variants
                 )
@@ -1215,20 +1216,34 @@ class TuneBridgeApp(QMainWindow):
 
                 if target_ms:
                     target_sec = target_ms / 1000.0
+                    # 6% of duration, min 8s — prevents matching a different song with similar length
+                    tolerance  = max(8.0, target_sec * 0.06)
                     candidates = _search_yt_candidates(query, count=5)
-                    _log.info("Duration match: target=%.1fs, candidates=%d for %r",
-                              target_sec, len(candidates), query)
+                    _log.info("Duration match: target=%.1fs tol=%.1fs candidates=%d for %r",
+                              target_sec, tolerance, len(candidates), query)
                     if candidates:
-                        best = min(candidates, key=lambda c: abs(c["duration"] - target_sec))
-                        diff = abs(best["duration"] - target_sec)
-                        _log.info("Best candidate: %r dur=%.1fs diff=%.1fs",
-                                  best["title"], best["duration"], diff)
-                        # Only use duration match if within 30 s — avoids picking a live/remix
-                        if diff <= 30:
+                        within = [c for c in candidates
+                                  if abs(c["duration"] - target_sec) <= tolerance]
+                        if within:
+                            # Among duration-matching candidates, prefer title containing
+                            # the artist or track name to avoid picking a different song
+                            # with coincidentally similar duration.
+                            a_n = _norm_str(artist.split(",")[0].strip())
+                            t_n = _norm_str(title)
+                            def _score(c, _a=a_n, _t=t_n):
+                                ct = _norm_str(c.get("title", ""))
+                                return (_a not in ct and _t not in ct,
+                                        abs(c["duration"] - target_sec))
+                            best = min(within, key=_score)
+                            diff = abs(best["duration"] - target_sec)
                             search_url = f"https://www.youtube.com/watch?v={best['id']}"
-                            _log.info("Using duration-matched URL: %s", search_url)
+                            _log.info("Duration-matched: %r dur=%.1fs diff=%.1fs",
+                                      best["title"], best["duration"], diff)
                         else:
-                            _log.warning("Best candidate diff %.1fs > 30s, falling back", diff)
+                            _log.warning(
+                                "No candidate within %.1fs tolerance for %r, falling back",
+                                tolerance, query,
+                            )
                 else:
                     _log.warning("iTunes returned no duration for %r, using ytsearch fallback", query)
             else:
