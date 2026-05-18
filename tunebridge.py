@@ -1225,20 +1225,27 @@ class TuneBridgeApp(QMainWindow):
                         within = [c for c in candidates
                                   if abs(c["duration"] - target_sec) <= tolerance]
                         if within:
-                            # Among duration-matching candidates, prefer title containing
-                            # the artist or track name to avoid picking a different song
-                            # with coincidentally similar duration.
+                            # Prefer: (1) YouTube Music "- Topic" channels (official
+                            # studio master, same as Spotify/Apple Music);
+                            # (2) title contains BOTH artist AND track title — avoids
+                            # picking a different Vicco song just because "Vicco" appears;
+                            # (3) closest duration as tiebreaker.
                             a_n = _norm_str(artist.split(",")[0].strip())
                             t_n = _norm_str(title)
-                            def _score(c, _a=a_n, _t=t_n):
+                            def _score(c, _a=a_n, _t=t_n, _ts=target_sec):
                                 ct = _norm_str(c.get("title", ""))
-                                return (_a not in ct and _t not in ct,
-                                        abs(c["duration"] - target_sec))
+                                ch = c.get("channel", "").lower()
+                                return (
+                                    not ch.endswith(" - topic"),
+                                    not (_a in ct and _t in ct),
+                                    abs(c["duration"] - _ts),
+                                )
                             best = min(within, key=_score)
                             diff = abs(best["duration"] - target_sec)
                             search_url = f"https://www.youtube.com/watch?v={best['id']}"
-                            _log.info("Duration-matched: %r dur=%.1fs diff=%.1fs",
-                                      best["title"], best["duration"], diff)
+                            _log.info("Duration-matched: %r ch=%r dur=%.1fs diff=%.1fs",
+                                      best["title"], best.get("channel", ""),
+                                      best["duration"], diff)
                         else:
                             _log.warning(
                                 "No candidate within %.1fs tolerance for %r, falling back",
