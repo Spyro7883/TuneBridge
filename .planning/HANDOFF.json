@@ -1,44 +1,50 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-17T21:55:00+03:00",
-  "phase": "5",
+  "timestamp": "2026-05-18T17:30:00+03:00",
+  "phase": "05",
   "phase_name": "organization",
   "phase_dir": ".planning/phases/05-organization",
   "plan": 4,
-  "task": 4,
-  "total_tasks": 4,
+  "task": 5,
+  "total_tasks": 5,
   "status": "paused_uat",
   "completed_tasks": [
-    {"id": 1, "name": "Plan 01 RED-gate test scaffold", "status": "done", "commit": "6d6c4cf"},
-    {"id": 2, "name": "Plan 02 Static symbols + FolderConfirmDialog", "status": "done", "commit": "c476678"},
-    {"id": 3, "name": "Plan 03 Threading wiring", "status": "done", "commit": "214dd22"},
-    {"id": 4, "name": "Plan 04 Batch completion tracker", "status": "done", "commit": "4f4f1e4"},
-    {"id": 5, "name": "Code review + fixes (CR-01/02, WR-01..05)", "status": "done", "commit": "3d4762b"},
-    {"id": 6, "name": "UAT bug: UI lock not released", "status": "done", "commit": "4755cf4"},
-    {"id": 7, "name": "UAT bug: Start blocked by completed rows", "status": "done", "commit": "749da94"},
-    {"id": 8, "name": "UAT bug: shutil.move Windows overwrite", "status": "done", "commit": "fa75d58"},
-    {"id": 9, "name": "feat: duration-based YouTube matching", "status": "done", "commit": "c14bec3"},
-    {"id": 10, "name": "fix: iTunes ES store for Spanish artists", "status": "done", "commit": "edec6a9"}
+    {"id": 1, "name": "Phase 5 Plans 01-04 + code review all complete", "status": "done", "commit": "86499fe"},
+    {"id": 2, "name": "80 automated tests GREEN", "status": "done", "commit": "3cf747c"},
+    {"id": 3, "name": "Repo cleaned: no artist/song names in code or commits", "status": "done", "commit": "3cf747c"},
+    {"id": 4, "name": "Quoted-title YT search + title match (_find_best_yt_match)", "status": "done", "commit": "029e8f1"}
   ],
   "remaining_tasks": [
-    {"id": 11, "name": "UAT: concurrent dialog serialization (visual)", "status": "pending_human"},
-    {"id": 12, "name": "UAT: smart default pre-fill (visual)", "status": "pending_human"},
-    {"id": 13, "name": "UAT: confirm button live validation (visual)", "status": "pending_human"},
-    {"id": 14, "name": "UAT: verify duration matching picks correct song", "status": "in_progress"},
-    {"id": 15, "name": "Phase 6: iBroadcast Upload — discuss + plan + execute", "status": "not_started"}
+    {"id": 5, "name": "Handle Spotify songs not on YouTube gracefully", "status": "in_progress"},
+    {"id": 6, "name": "Plan Phase 6 (iBroadcast Upload)", "status": "not_started"}
   ],
-  "blockers": [],
+  "blockers": [
+    {
+      "description": "SSL CERTIFICATE_VERIFY_FAILED for music.youtube.com. spotDL and ytmusicapi both fail. Only yt-dlp (--no-check-certificate) and requests to open.spotify.com work.",
+      "type": "technical",
+      "workaround": "Use ONLY yt-dlp ytsearch: for YouTube. Do NOT add any library making direct HTTPS to music.youtube.com."
+    },
+    {
+      "description": "Some Spotify songs do not exist on YouTube at all (e.g. the tested song 'Volver a Nacer' by Vicco — only Chayanne has a song with this title on YouTube). No ytsearch query can return a non-existent video.",
+      "type": "technical",
+      "workaround": "Show user an error/warning when no match found instead of downloading wrong song. Consider letting user paste a direct YouTube URL as override."
+    }
+  ],
   "human_actions_pending": [
-    {"action": "Test 'Volver a Nacer' Vicco to confirm duration matching works", "context": "iTunes ES store fix just committed — needs real download test", "blocking": false},
-    {"action": "Complete 3 visual UAT items in 05-HUMAN-UAT.md", "context": "Threading behavior and dialog pre-fill require live app testing", "blocking": false}
+    {
+      "action": "Decide UX for songs not found on YouTube: show error row, skip, or let user provide YouTube URL",
+      "context": "Current fallback downloads wrong song silently — bad UX for public launch",
+      "blocking": true
+    }
   ],
   "decisions": [
-    {"decision": "_show_folder_dialog does file I/O on main thread", "rationale": "Test contract requires it — tests call _show_folder_dialog directly and assert I/O outcomes", "phase": "5"},
-    {"decision": "Duration matching: iTunes ES first, then US", "rationale": "Spanish-language artists (Vicco, Bad Bunny) not in US iTunes store", "phase": "5"},
-    {"decision": "search_duration_ms returns None on no confident match", "rationale": "Returning results[0] duration biased toward wrong song", "phase": "5"},
-    {"decision": "remove_completed_rows() at _process_urls start", "rationale": "Auto-clears previous batch rows so Start button is not blocked", "phase": "5"}
+    {"decision": "Do NOT use ytmusicapi or spotDL", "rationale": "SSL CERTIFICATE_VERIFY_FAILED on this machine", "phase": "05"},
+    {"decision": "_find_best_yt_match: quoted title search + title substring match", "rationale": "More precise than unquoted, but cannot find songs absent from YouTube", "phase": "05"},
+    {"decision": "No artist/song names in code or commits", "rationale": "Public repo — clean history", "phase": "05"}
   ],
-  "uncommitted_files": [],
-  "next_action": "User tests duration matching with Vicco track. After UAT approval, /gsd-discuss-phase 6",
-  "context_notes": "Phase 5 fully implemented. Session found 4 real UAT bugs + 7 code review issues, all fixed. Duration matching is the last feature added. ItunesClient class name is misleading (scrapes Spotify HTML) — new search_duration_ms() is the actual iTunes API method."
+  "uncommitted_files": [
+    ".planning/phases/05-organization/05-HUMAN-UAT.md"
+  ],
+  "next_action": "Fix: when _find_best_yt_match returns None AND ytsearch also fails to find the right song, show the row as FAILED with a message like 'Song not found on YouTube — paste a direct YouTube URL'. This prevents silently downloading wrong content.",
+  "context_notes": "Root cause found: some Spotify songs are simply not on YouTube. No matching algorithm can fix this. The correct UX is to surface the failure clearly and let the user provide a direct YouTube URL as a fallback. The _find_best_yt_match function itself is working correctly — it's the source data that's missing."
 }
