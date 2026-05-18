@@ -314,30 +314,62 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
     return mp3s[0] if mp3s else None
 
 
-def _download_with_spotdl(spotify_url: str, out_dir: Path) -> Path | None:
-    """Download a Spotify track via spotDL (uses YouTube Music + ISRC internally).
+def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
+    """Return top N YouTube search results as {id, title, channel} dicts.
 
-    Serialized via _download_lock — same as download_track_for_row.
-    Returns the downloaded .mp3 path or None if spotDL is unavailable or fails.
+    Wraps the query in 'audio' suffix; returns [] on any failure.
     """
-    spotdl_bin = shutil.which("spotdl")
-    if not spotdl_bin:
+    ytdlp = shutil.which("yt-dlp")
+    if not ytdlp:
+        return []
+    try:
+        result = subprocess.run(
+            [ytdlp, "--dump-json", "--flat-playlist", "--no-playlist",
+             "--no-check-certificate", f"ytsearch{count}:{query} audio"],
+            capture_output=True, text=True, timeout=30,
+            encoding="utf-8", errors="replace",
+        )
+        candidates = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                info = json.loads(line)
+                vid_id = info.get("id", "")
+                if vid_id:
+                    candidates.append({
+                        "id":      vid_id,
+                        "title":   info.get("title", ""),
+                        "channel": info.get("channel", "") or info.get("uploader", ""),
+                    })
+            except (json.JSONDecodeError, ValueError):
+                continue
+        return candidates
+    except Exception:
+        return []
+
+
+def _find_best_yt_match(title: str, artist: str) -> str | None:
+    """Find the best YouTube URL for a Spotify track using exact-phrase search.
+
+    Searches with quoted title for precision, then picks the first candidate
+    whose video title contains both artist and track title words.
+    Returns a YouTube watch URL, or None if no confident match found.
+    """
+    # Quoted title anchors the search on the exact song name
+    candidates = _search_yt_candidates(f'"{title}" {artist}', count=5)
+    if not candidates:
         return None
-    with _download_lock:
-        try:
-            subprocess.run(
-                [spotdl_bin, "download", spotify_url,
-                 "--output", str(out_dir),
-                 "--format", "mp3",
-                 "--bitrate", "auto",
-                 "--log-level", "WARNING"],
-                capture_output=True, text=True, timeout=180,
-                encoding="utf-8", errors="replace",
-            )
-        except Exception:
-            return None
-    mp3s = sorted(out_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return mp3s[0] if mp3s else None
+
+    artist_key = artist.split(",")[0].strip().lower()
+    title_l    = title.lower()
+
+    for c in candidates:
+        ct = c.get("title", "").lower()
+        if artist_key in ct and title_l in ct:
+            return f"https://www.youtube.com/watch?v={c['id']}"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1167,7 +1199,7 @@ class TuneBridgeApp(QMainWindow):
         """Worker thread: download + optional retune. Per-row error isolation.
 
         Mirrors _metadata_worker exactly: closing guard → try/except → emit signal.
-        Routing: Spotify → spotDL (YouTube Music/ISRC) with ytsearch fallback;
+        Routing: Spotify → quoted-title YT search + title match, ytsearch fallback;
                  YouTube → direct URL (D-01, D-02).
         """
         if self._closing.is_set():
@@ -1181,13 +1213,14 @@ class TuneBridgeApp(QMainWindow):
 
             _log = logging.getLogger(__name__)
             if url_type == "Spotify":
-                # spotDL matches via ISRC — most accurate for Spotify URLs
-                downloaded = _download_with_spotdl(url, row_tmp)
-                if not downloaded:
-                    # spotDL unavailable or failed — fall back to basic ytsearch
-                    artist = _sanitise_search_term(metadata.get("artist", ""))
-                    title  = _sanitise_search_term(metadata.get("track_title", ""))
-                    _log.warning("spotDL unavailable/failed, using ytsearch for %r",
+                artist = _sanitise_search_term(metadata.get("artist", ""))
+                title  = _sanitise_search_term(metadata.get("track_title", ""))
+                # Search YouTube with quoted title for exact-phrase precision
+                yt_url = _find_best_yt_match(title, artist)
+                if yt_url:
+                    downloaded = download_track_for_row(yt_url, row_tmp)
+                else:
+                    _log.warning("No confident YT match for %r, using ytsearch",
                                  f"{title} {artist}")
                     downloaded = download_track_for_row(
                         f"ytsearch:{title} {artist} audio", row_tmp
