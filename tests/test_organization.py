@@ -218,3 +218,27 @@ def test_close_event_unblocks_pending_workers(window):
     window.closeEvent(mock_close_event)
     assert ev1.is_set(), "closeEvent did not unblock ev1"
     assert ev2.is_set(), "closeEvent did not unblock ev2"
+
+
+def test_dialog_lock_blocks_concurrent_acquisition():
+    """SC-5: _dialog_lock is a real mutex — second acquire blocks while first is held."""
+    lock_held = threading.Event()
+    proceed = threading.Event()
+
+    def hold():
+        with _dialog_lock:
+            lock_held.set()
+            proceed.wait(timeout=2)
+
+    t = threading.Thread(target=hold, daemon=True)
+    t.start()
+    lock_held.wait(timeout=1)
+
+    # Non-blocking acquire must fail while t holds the lock
+    acquired = _dialog_lock.acquire(blocking=False)
+    if acquired:
+        _dialog_lock.release()
+    proceed.set()
+    t.join(timeout=2)
+
+    assert not acquired, "Lock was acquirable while held by another thread — no mutual exclusion"

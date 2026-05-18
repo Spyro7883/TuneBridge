@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 import urllib.parse
 import uuid
 from collections.abc import Callable
@@ -315,9 +316,11 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
 
 
 def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
-    """Return top N YouTube search results as {id, title, duration} dicts.
+    """Return top N YouTube search results as {id, title, duration, channel} dicts.
 
-    Uses yt-dlp --dump-json --flat-playlist — no download, metadata only.
+    Searches for "{query} audio" to prefer audio uploads over music videos.
+    Includes channel name so callers can prefer YouTube Music Topic channels
+    (auto-generated, studio-quality audio — channel name ends with " - Topic").
     duration is in seconds (float). Returns [] on any failure.
     """
     ytdlp = shutil.which("yt-dlp")
@@ -327,7 +330,7 @@ def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
         result = subprocess.run(
             [
                 ytdlp, "--dump-json", "--flat-playlist", "--no-playlist",
-                "--no-check-certificate", f"ytsearch{count}:{query}",
+                "--no-check-certificate", f"ytsearch{count}:{query} audio",
             ],
             capture_output=True, text=True, timeout=30,
             encoding="utf-8", errors="replace",
@@ -346,6 +349,7 @@ def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
                     "id":       vid_id,
                     "title":    info.get("title", ""),
                     "duration": float(info.get("duration") or 0),
+                    "channel":  info.get("channel", "") or info.get("uploader", ""),
                 })
             except (json.JSONDecodeError, ValueError):
                 continue
@@ -435,10 +439,14 @@ class ItunesClient:
         correct video when ytsearch returns multiple candidates.
         Returns None on any failure — callers fall back to ytsearch1:.
         """
+        def _norm(s: str) -> str:
+            """Lowercase + strip accents (e.g. 'Qué' → 'que')."""
+            return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+
         try:
             term = urllib.parse.quote(f"{artist} {title}")
-            # Try international store first, then US — covers non-English artists (e.g. Vicco/ES)
-            for store in ("&country=ES", ""):
+            # ES/MX first for Latin artists (Vicco, TINI, Bad Bunny), then US
+            for store in ("&country=ES", "&country=MX", ""):
                 resp = requests.get(
                     f"https://itunes.apple.com/search?term={term}&entity=song&limit=5{store}",
                     timeout=8,
@@ -449,13 +457,22 @@ class ItunesClient:
                     break
             if not results:
                 return None
-            artist_l, title_l = artist.lower(), title.lower()
+
+            title_n = _norm(title)
+            # For collaborations like "TINI, Cali Y El Dandee", also try first artist only
+            artist_variants = [_norm(artist)]
+            if "," in artist:
+                artist_variants.append(_norm(artist.split(",")[0].strip()))
+
             for r in results:
-                if (artist_l in r.get("artistName", "").lower()
-                        and title_l in r.get("trackName", "").lower()):
+                r_artist = _norm(r.get("artistName", ""))
+                r_title  = _norm(r.get("trackName", ""))
+                artist_match = any(
+                    v in r_artist or r_artist in v for v in artist_variants
+                )
+                if artist_match and title_n in r_title:
                     return r.get("trackTimeMillis")
             # No confident match — return None so caller falls back to ytsearch1:
-            # Returning results[0] duration risks biasing toward the wrong song.
             return None
         except Exception:
             return None
