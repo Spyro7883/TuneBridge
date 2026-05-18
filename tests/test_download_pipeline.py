@@ -45,8 +45,8 @@ def window(qapp):
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_spotify_search_query_uses_artist_and_title(window):
-    """DL-01: Spotify path builds ytsearch:{artist} {title} audio — not raw URL."""
+def test_spotify_search_query_uses_title_then_artist(window):
+    """DL-01: Spotify path builds ytsearch:{title} {artist} audio (title-first for relevance)."""
     metadata = {"artist": "Portishead", "track_title": "Glory Box", "source": "Spotify"}
     fake_mp3 = window._session_tmp / "abcdef12" / "track.mp3"
     with patch("tunebridge.download_track_for_row") as mock_dl, \
@@ -56,8 +56,8 @@ def test_spotify_search_query_uses_artist_and_title(window):
             mock_uuid.return_value.hex = "abcdef1234567890"
             window._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 440)
         called_url = mock_dl.call_args[0][0]
-        assert called_url == "ytsearch:Portishead Glory Box audio", (
-            f"Expected ytsearch query, got: {called_url!r}"
+        assert called_url == "ytsearch:Glory Box Portishead audio", (
+            f"Expected title-first ytsearch query, got: {called_url!r}"
         )
 
 

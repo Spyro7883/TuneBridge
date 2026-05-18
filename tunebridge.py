@@ -1207,9 +1207,10 @@ class TuneBridgeApp(QMainWindow):
             if url_type == "Spotify":
                 artist = _sanitise_search_term(metadata.get("artist", ""))
                 title  = _sanitise_search_term(metadata.get("track_title", ""))
-                query  = f"{artist} {title}"
+                # Title-first gives better YouTube relevance for official audio
+                query  = f"{title} {artist}"
 
-                # Duration-based matching: iTunes gives target_ms, ytsearch5 gives candidates
+                # Duration-based matching: iTunes gives target_ms, ytsearch8 gives candidates
                 _log = logging.getLogger(__name__)
                 target_ms   = self._itunes_client.search_duration_ms(artist, title)
                 search_url  = f"ytsearch:{query} audio"   # fallback
@@ -1218,34 +1219,42 @@ class TuneBridgeApp(QMainWindow):
                     target_sec = target_ms / 1000.0
                     # 6% of duration, min 8s — prevents matching a different song with similar length
                     tolerance  = max(8.0, target_sec * 0.06)
-                    candidates = _search_yt_candidates(query, count=5)
+                    candidates = _search_yt_candidates(query, count=8)
                     _log.info("Duration match: target=%.1fs tol=%.1fs candidates=%d for %r",
                               target_sec, tolerance, len(candidates), query)
                     if candidates:
                         within = [c for c in candidates
                                   if abs(c["duration"] - target_sec) <= tolerance]
                         if within:
-                            # Prefer: (1) YouTube Music "- Topic" channels (official
-                            # studio master, same as Spotify/Apple Music);
-                            # (2) title contains BOTH artist AND track title — avoids
-                            # picking a different Vicco song just because "Vicco" appears;
-                            # (3) closest duration as tiebreaker.
                             a_n = _norm_str(artist.split(",")[0].strip())
                             t_n = _norm_str(title)
-                            def _score(c, _a=a_n, _t=t_n, _ts=target_sec):
-                                ct = _norm_str(c.get("title", ""))
-                                ch = c.get("channel", "").lower()
-                                return (
-                                    not ch.endswith(" - topic"),
-                                    not (_a in ct and _t in ct),
-                                    abs(c["duration"] - _ts),
+                            # Candidates that contain BOTH artist AND title in video title
+                            title_hits = [
+                                c for c in within
+                                if a_n in _norm_str(c.get("title", ""))
+                                and t_n in _norm_str(c.get("title", ""))
+                            ]
+                            # If no title-confirmed hit, skip duration match entirely —
+                            # picking a wrong song with a similar duration is worse than
+                            # falling back to ytsearch1: (search_url stays as set above).
+                            if title_hits:
+                                # Among confirmed hits prefer Topic channels (official studio
+                                # master), then closest duration.
+                                best = min(title_hits, key=lambda c: (
+                                    not c.get("channel", "").lower().endswith(" - topic"),
+                                    abs(c["duration"] - target_sec),
+                                ))
+                                diff = abs(best["duration"] - target_sec)
+                                search_url = f"https://www.youtube.com/watch?v={best['id']}"
+                                _log.info("Duration-matched: %r ch=%r dur=%.1fs diff=%.1fs",
+                                          best["title"], best.get("channel", ""),
+                                          best["duration"], diff)
+                            else:
+                                _log.warning(
+                                    "No title-confirmed candidate for %r — skipping duration "
+                                    "match, falling back to ytsearch",
+                                    query,
                                 )
-                            best = min(within, key=_score)
-                            diff = abs(best["duration"] - target_sec)
-                            search_url = f"https://www.youtube.com/watch?v={best['id']}"
-                            _log.info("Duration-matched: %r ch=%r dur=%.1fs diff=%.1fs",
-                                      best["title"], best.get("channel", ""),
-                                      best["duration"], diff)
                         else:
                             _log.warning(
                                 "No candidate within %.1fs tolerance for %r, falling back",
