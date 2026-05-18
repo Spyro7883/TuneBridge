@@ -446,7 +446,7 @@ class ItunesClient:
         """
         try:
             term = urllib.parse.quote(f"{artist} {title}")
-            # ES/MX first for Latin artists (Vicco, TINI, Bad Bunny), then US
+            # ES/MX stores first for broader international coverage, then US
             for store in ("&country=ES", "&country=MX", ""):
                 resp = requests.get(
                     f"https://itunes.apple.com/search?term={term}&entity=song&limit=5{store}",
@@ -460,7 +460,7 @@ class ItunesClient:
                 return None
 
             title_n = _norm_str(title)
-            # For collaborations like "TINI, Cali Y El Dandee", also try first artist only
+            # For collaboration credits like "Artist A, Artist B", also try first artist only
             artist_variants = [_norm_str(artist)]
             if "," in artist:
                 artist_variants.append(_norm_str(artist.split(",")[0].strip()))
