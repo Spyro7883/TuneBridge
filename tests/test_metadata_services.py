@@ -329,34 +329,34 @@ def test_search_duration_ms_simple_match():
     """search_duration_ms returns trackTimeMillis when artist and title match exactly."""
     client = ItunesClient()
     with patch("tunebridge.requests.get", return_value=_itunes_resp([{
-        "artistName": "Vicco",
-        "trackName": "Volver a Nacer",
+        "artistName": "Artist One",
+        "trackName": "Song Alpha",
         "trackTimeMillis": 190000,
     }])):
-        assert client.search_duration_ms("Vicco", "Volver a Nacer") == 190000
+        assert client.search_duration_ms("Artist One", "Song Alpha") == 190000
 
 
 def test_search_duration_ms_collaboration_first_artist_matches():
-    """'TINI, Cali Y El Dandee' matches when iTunes artistName is only 'TINI'."""
+    """Collaboration credit 'Artist A, Artist B' matches when iTunes artistName is only 'Artist A'."""
     client = ItunesClient()
     with patch("tunebridge.requests.get", return_value=_itunes_resp([{
-        "artistName": "TINI",
-        "trackName": "Por Que Te Vas",
+        "artistName": "Artist A",
+        "trackName": "Song Beta",
         "trackTimeMillis": 195000,
     }])):
-        result = client.search_duration_ms("TINI, Cali Y El Dandee", "Por Qué Te Vas")
+        result = client.search_duration_ms("Artist A, Artist B", "Song Beta")
     assert result == 195000
 
 
 def test_search_duration_ms_accented_title_normalized():
-    """'Por Qué Te Vas' (accent) matches iTunes 'Por Que Te Vas' via unicode normalization."""
+    """Accented title 'Café' matches iTunes 'Cafe' via unicode normalization."""
     client = ItunesClient()
     with patch("tunebridge.requests.get", return_value=_itunes_resp([{
-        "artistName": "TINI",
-        "trackName": "Por Que Te Vas",
+        "artistName": "Artist One",
+        "trackName": "Cafe Song",
         "trackTimeMillis": 195000,
     }])):
-        result = client.search_duration_ms("TINI", "Por Qué Te Vas")
+        result = client.search_duration_ms("Artist One", "Café Song")
     assert result == 195000
 
 
@@ -364,11 +364,11 @@ def test_search_duration_ms_no_match_returns_none():
     """Returns None when no iTunes result matches artist+title."""
     client = ItunesClient()
     with patch("tunebridge.requests.get", return_value=_itunes_resp([{
-        "artistName": "Other Artist",
-        "trackName": "Other Song",
+        "artistName": "Different Artist",
+        "trackName": "Different Song",
         "trackTimeMillis": 200000,
     }])):
-        assert client.search_duration_ms("TINI", "Por Qué Te Vas") is None
+        assert client.search_duration_ms("Artist One", "Song Alpha") is None
 
 
 def test_search_duration_ms_empty_results_returns_none():
