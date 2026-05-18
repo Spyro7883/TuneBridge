@@ -1,50 +1,55 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-18T17:30:00+03:00",
-  "phase": "05",
-  "phase_name": "organization",
-  "phase_dir": ".planning/phases/05-organization",
-  "plan": 4,
-  "task": 5,
-  "total_tasks": 5,
-  "status": "paused_uat",
+  "timestamp": "2026-05-18T22:21:00+03:00",
+  "phase": "06",
+  "phase_name": "iBroadcast Upload",
+  "phase_dir": ".planning/phases/06-ibroadcast-upload",
+  "plan": 0,
+  "task": 0,
+  "total_tasks": 0,
+  "status": "paused",
   "completed_tasks": [
-    {"id": 1, "name": "Phase 5 Plans 01-04 + code review all complete", "status": "done", "commit": "86499fe"},
-    {"id": 2, "name": "80 automated tests GREEN", "status": "done", "commit": "3cf747c"},
-    {"id": 3, "name": "Repo cleaned: no artist/song names in code or commits", "status": "done", "commit": "3cf747c"},
-    {"id": 4, "name": "Quoted-title YT search + title match (_find_best_yt_match)", "status": "done", "commit": "029e8f1"}
+    {"id": 1, "name": "Phases 1-5 all complete, 80/80 tests GREEN", "status": "done", "commit": "86499fe"},
+    {"id": 2, "name": "Switch to music.youtube.com/search?q= (ytmsearch: unsupported)", "status": "done", "commit": "95c4dab"},
+    {"id": 3, "name": "Fix Windows cp1252 encoding with PYTHONUTF8=1 in subprocess", "status": "done", "commit": "8f3c072"},
+    {"id": 4, "name": "Add view_count log-scale scoring + channel match + penalty list", "status": "done", "commit": "8f3c072"},
+    {"id": 5, "name": "Remove legacy retune_app.py", "status": "done", "commit": "7c505e9"}
   ],
   "remaining_tasks": [
-    {"id": 5, "name": "Handle Spotify songs not on YouTube gracefully", "status": "in_progress"},
-    {"id": 6, "name": "Plan Phase 6 (iBroadcast Upload)", "status": "not_started"}
+    {"id": 6, "name": "Plan Phase 6: iBroadcast Upload", "status": "not_started"},
+    {"id": 7, "name": "Execute Phase 6: auth, duplicate check, upload after folder save", "status": "not_started"}
   ],
   "blockers": [
     {
-      "description": "SSL CERTIFICATE_VERIFY_FAILED for music.youtube.com. spotDL and ytmusicapi both fail. Only yt-dlp (--no-check-certificate) and requests to open.spotify.com work.",
+      "description": "SSL antivirus proxy interception — git push requires http.sslVerify=false",
       "type": "technical",
-      "workaround": "Use ONLY yt-dlp ytsearch: for YouTube. Do NOT add any library making direct HTTPS to music.youtube.com."
+      "workaround": "git config --local http.sslVerify false already applied to repo"
+    }
+  ],
+  "human_actions_pending": [],
+  "decisions": [
+    {
+      "decision": "music.youtube.com/search?q= URL for YouTube Music search",
+      "rationale": "ytmsearch: prefix not supported in yt-dlp 2026.03.17",
+      "phase": "04-bonus"
     },
     {
-      "description": "Some Spotify songs do not exist on YouTube at all (e.g. the tested song 'Volver a Nacer' by Vicco — only Chayanne has a song with this title on YouTube). No ytsearch query can return a non-existent video.",
-      "type": "technical",
-      "workaround": "Show user an error/warning when no match found instead of downloading wrong song. Consider letting user paste a direct YouTube URL as override."
-    }
-  ],
-  "human_actions_pending": [
+      "decision": "PYTHONUTF8=1 env var in _search_yt_candidates subprocess",
+      "rationale": "Windows cp1252 console corrupts accented chars (é, í, ú) to \\ufffd — breaks title match",
+      "phase": "04-bonus"
+    },
     {
-      "action": "Decide UX for songs not found on YouTube: show error row, skip, or let user provide YouTube URL",
-      "context": "Current fallback downloads wrong song silently — bad UX for public launch",
-      "blocking": true
+      "decision": "view_count as primary quality signal (log scale, capped 9pts)",
+      "rationale": "Official releases have orders of magnitude more views than bass-boosted/lyric/fan uploads",
+      "phase": "04-bonus"
+    },
+    {
+      "decision": "Penalty -3pts for: letra, lyrics, lyric video, karaoke, bass boosted, sped up, slowed, nightcore, 8d audio, reverb, pitched",
+      "rationale": "Prevents non-original versions winning despite higher artist-in-title score",
+      "phase": "04-bonus"
     }
   ],
-  "decisions": [
-    {"decision": "Do NOT use ytmusicapi or spotDL", "rationale": "SSL CERTIFICATE_VERIFY_FAILED on this machine", "phase": "05"},
-    {"decision": "_find_best_yt_match: quoted title search + title substring match", "rationale": "More precise than unquoted, but cannot find songs absent from YouTube", "phase": "05"},
-    {"decision": "No artist/song names in code or commits", "rationale": "Public repo — clean history", "phase": "05"}
-  ],
-  "uncommitted_files": [
-    ".planning/phases/05-organization/05-HUMAN-UAT.md"
-  ],
-  "next_action": "Fix: when _find_best_yt_match returns None AND ytsearch also fails to find the right song, show the row as FAILED with a message like 'Song not found on YouTube — paste a direct YouTube URL'. This prevents silently downloading wrong content.",
-  "context_notes": "Root cause found: some Spotify songs are simply not on YouTube. No matching algorithm can fix this. The correct UX is to surface the failure clearly and let the user provide a direct YouTube URL as a fallback. The _find_best_yt_match function itself is working correctly — it's the source data that's missing."
+  "uncommitted_files": [],
+  "next_action": "Run /gsd-plan-phase for Phase 6: iBroadcast Upload (auth, duplicate check, upload after folder save). Requirements: UPL-01, UPL-02 in REQUIREMENTS.md.",
+  "context_notes": "All 5 phases complete. Spotify search now uses music.youtube.com with scored matching — tested on Bad Gyal, Vicco, Quevedo, El Alfa. Phase 6 is the final phase for v1.0. No uncommitted work."
 }
