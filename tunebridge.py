@@ -315,61 +315,89 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
 
 
 def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
-    """Return top N YouTube search results as {id, title, channel} dicts.
-
-    Wraps the query in 'audio' suffix; returns [] on any failure.
-    """
+    """Return top N YouTube Music results as {id, title, channel, duration} dicts."""
     ytdlp = shutil.which("yt-dlp")
     if not ytdlp:
         return []
     try:
+        encoded = urllib.parse.quote_plus(query)
+        search_url = f"https://music.youtube.com/search?q={encoded}"
         result = subprocess.run(
-            [ytdlp, "--dump-json", "--flat-playlist", "--no-playlist",
-             "--no-check-certificate", f"ytsearch{count}:{query} audio"],
+            [ytdlp, "--playlist-end", str(count), "--no-check-certificate", "--no-warnings",
+             "--print", "%(id)s|||%(title)s|||%(duration)s|||%(channel)s",
+             search_url],
             capture_output=True, text=True, timeout=30,
             encoding="utf-8", errors="replace",
         )
         candidates = []
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if not line:
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("|||")
+            if len(parts) < 3:
+                continue
+            vid_id = parts[0].strip()
+            if not vid_id:
                 continue
             try:
-                info = json.loads(line)
-                vid_id = info.get("id", "")
-                if vid_id:
-                    candidates.append({
-                        "id":      vid_id,
-                        "title":   info.get("title", ""),
-                        "channel": info.get("channel", "") or info.get("uploader", ""),
-                    })
-            except (json.JSONDecodeError, ValueError):
-                continue
+                duration = float(parts[2].strip())
+            except ValueError:
+                duration = 0.0
+            candidates.append({
+                "id":       vid_id,
+                "title":    parts[1].strip(),
+                "channel":  parts[3].strip() if len(parts) > 3 else "",
+                "duration": duration,
+            })
         return candidates
     except Exception:
         return []
 
 
-def _find_best_yt_match(title: str, artist: str) -> str | None:
-    """Find the best YouTube URL for a Spotify track using exact-phrase search.
+def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | None:
+    """Find best YouTube Music URL for a Spotify track.
 
-    Searches with quoted title for precision, then picks the first candidate
-    whose video title contains both artist and track title words.
-    Returns a YouTube watch URL, or None if no confident match found.
+    Scores candidates: duration proximity ±2s (up to 10pts), title match (5pts),
+    artist match (3pts). Returns a YouTube Music URL, or None if nothing matched.
     """
-    # Quoted title anchors the search on the exact song name
-    candidates = _search_yt_candidates(f'"{title}" {artist}', count=5)
+    query = f"{artist} {title}" if artist else title
+    candidates = _search_yt_candidates(query, count=5)
     if not candidates:
         return None
 
-    artist_key = artist.split(",")[0].strip().lower()
+    target_s   = duration_ms / 1000.0 if duration_ms else None
     title_l    = title.lower()
+    artist_key = artist.split(",")[0].strip().lower()
 
+    scored = []
     for c in candidates:
-        ct = c.get("title", "").lower()
-        if artist_key in ct and title_l in ct:
-            return f"https://www.youtube.com/watch?v={c['id']}"
-    return None
+        score  = 0.0
+        vid_l  = c.get("title", "").lower()
+
+        if target_s is not None:
+            diff = abs((c.get("duration") or 0) - target_s)
+            if diff <= 2:
+                score += 10.0 - diff * 2
+            elif diff <= 5:
+                score += 2.0
+
+        if title_l in vid_l:
+            score += 5.0
+        if artist_key and artist_key in vid_l:
+            score += 3.0
+        if artist_key and artist_key in c.get("channel", "").lower():
+            score += 3.0
+        # Penalise lyric/letra videos — not clean audio
+        if any(kw in vid_l for kw in ("letra", "lyrics", "lyric video", "karaoke")):
+            score -= 3.0
+
+        scored.append((score, c))
+
+    scored.sort(key=lambda x: -x[0])
+    best_score, best = scored[0]
+
+    if best_score <= 0:
+        return None
+
+    return f"https://music.youtube.com/watch?v={best['id']}"
 
 
 # ---------------------------------------------------------------------------
@@ -1213,18 +1241,15 @@ class TuneBridgeApp(QMainWindow):
 
             _log = logging.getLogger(__name__)
             if url_type == "Spotify":
-                artist = _sanitise_search_term(metadata.get("artist", ""))
-                title  = _sanitise_search_term(metadata.get("track_title", ""))
-                # Search YouTube with quoted title for exact-phrase precision
-                yt_url = _find_best_yt_match(title, artist)
-                if yt_url:
-                    downloaded = download_track_for_row(yt_url, row_tmp)
-                else:
-                    _log.warning("No confident YT match for %r, using ytsearch",
-                                 f"{title} {artist}")
-                    downloaded = download_track_for_row(
-                        f"ytsearch:{title} {artist} audio", row_tmp
+                artist      = _sanitise_search_term(metadata.get("artist", ""))
+                title       = _sanitise_search_term(metadata.get("track_title", ""))
+                duration_ms = metadata.get("duration_ms", 0)
+                yt_url = _find_best_yt_match(title, artist, duration_ms=duration_ms)
+                if yt_url is None:
+                    raise RuntimeError(
+                        "Not found on YouTube Music — paste a direct YouTube URL instead."
                     )
+                downloaded = download_track_for_row(yt_url, row_tmp)
             else:
                 downloaded = download_track_for_row(url, row_tmp)
             if not downloaded:

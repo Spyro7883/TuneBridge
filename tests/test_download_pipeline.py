@@ -57,57 +57,56 @@ def test_spotify_uses_quoted_title_search(window):
          patch("tunebridge.uuid.uuid4") as mock_uuid:
         mock_uuid.return_value.hex = "abcdef1234567890"
         window._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 440)
-    mock_find.assert_called_once_with("Glory Box", "Portishead")
+    mock_find.assert_called_once_with("Glory Box", "Portishead", duration_ms=0)
 
 
-def test_spotify_falls_back_to_ytsearch_when_no_match(window):
-    """DL-01b: When _find_best_yt_match returns None, ytsearch fallback is used."""
+def test_spotify_emits_failed_when_no_yt_music_match(window):
+    """DL-01b: When _find_best_yt_match returns None, row gets FAILED_DOWNLOAD status."""
     metadata = {"artist": "Portishead", "track_title": "Glory Box", "source": "Spotify"}
-    fake_mp3 = window._session_tmp / "abcdef12" / "track.mp3"
+    emitted = []
+    window._dispatcher.row_status_changed.connect(lambda r, s: emitted.append((r, s)))
     with patch("tunebridge._find_best_yt_match", return_value=None), \
-         patch("tunebridge.download_track_for_row", return_value=fake_mp3) as mock_dl, \
          patch("pathlib.Path.mkdir"), \
          patch("tunebridge.uuid.uuid4") as mock_uuid:
         mock_uuid.return_value.hex = "abcdef1234567890"
         window._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 440)
-    called_url = mock_dl.call_args[0][0]
-    assert called_url.startswith("ytsearch:"), f"Expected ytsearch fallback, got: {called_url!r}"
+    failed = [s for r, s in emitted if r == 0 and s == SongStatus.FAILED_DOWNLOAD.value]
+    assert failed, f"Expected FAILED_DOWNLOAD status, got: {emitted}"
 
 
-def test_find_best_yt_match_picks_title_and_artist_match(tmp_path):
-    """_find_best_yt_match returns URL for first candidate with artist+title in video title."""
+def test_find_best_yt_match_picks_by_duration_and_title(tmp_path):
+    """_find_best_yt_match returns YouTube Music URL for candidate matching duration + title."""
     candidates = [
-        {"id": "wrong1", "title": "Artist One - Other Song (Audio)", "channel": ""},
-        {"id": "correct", "title": "Artist One - Song Alpha (Official Audio)", "channel": ""},
+        {"id": "wrong1", "title": "Artist One - Other Song", "channel": "", "duration": 200},
+        {"id": "correct", "title": "Artist One - Song Alpha (Official Audio)", "channel": "", "duration": 183},
     ]
     with patch("tunebridge._search_yt_candidates", return_value=candidates):
-        url = _find_best_yt_match("Song Alpha", "Artist One")
-    assert url == "https://www.youtube.com/watch?v=correct"
+        # duration_ms=183000 → 183s; candidate "correct" is within ±2s
+        url = _find_best_yt_match("Song Alpha", "Artist One", duration_ms=183000)
+    assert url == "https://music.youtube.com/watch?v=correct"
 
 
 def test_find_best_yt_match_returns_none_when_no_candidate_matches(tmp_path):
-    """_find_best_yt_match returns None when no candidate has artist+title in title."""
+    """_find_best_yt_match returns None when no candidate matches title or artist."""
     candidates = [
-        {"id": "x", "title": "Completely Unrelated Video", "channel": ""},
+        {"id": "x", "title": "Completely Unrelated Video", "channel": "", "duration": 0},
     ]
     with patch("tunebridge._search_yt_candidates", return_value=candidates):
         assert _find_best_yt_match("Song Alpha", "Artist One") is None
 
 
-def test_download_worker_spotify_path_calls_ytsearch(window):
-    """DL-01: When no YT match found, Spotify falls back to ytsearch with artist+title."""
+def test_download_worker_spotify_uses_yt_music_url(window):
+    """DL-01: Spotify path calls download_track_for_row with a YouTube Music URL."""
     metadata = {"artist": "Massive Attack", "track_title": "Teardrop", "source": "Spotify"}
-    with patch("tunebridge._find_best_yt_match", return_value=None), \
+    fake_url = "https://music.youtube.com/watch?v=abc123"
+    with patch("tunebridge._find_best_yt_match", return_value=fake_url), \
          patch("tunebridge.download_track_for_row") as mock_dl, \
          patch("tunebridge.uuid.uuid4") as mock_uuid:
         mock_dl.return_value = Path("/tmp/tb_test/track.mp3")
         mock_uuid.return_value.hex = "aabbccdd11223344"
         window._download_worker(0, "https://open.spotify.com/track/xyz", "Spotify", metadata, 440)
     called_url = mock_dl.call_args[0][0]
-    assert called_url.startswith("ytsearch:"), f"Expected ytsearch prefix, got: {called_url!r}"
-    assert "Massive Attack" in called_url
-    assert "Teardrop" in called_url
-    assert "audio" in called_url
+    assert called_url == fake_url, f"Expected YT Music URL, got: {called_url!r}"
 
 
 def test_download_worker_youtube_path_uses_direct_url(window):
@@ -121,7 +120,8 @@ def test_download_worker_youtube_path_uses_direct_url(window):
         window._download_worker(1, yt_url, "YouTube", metadata, 440)
     called_url = mock_dl.call_args[0][0]
     assert called_url == yt_url, f"Expected direct YouTube URL, got: {called_url!r}"
-    assert not called_url.startswith("ytsearch:"), "YouTube path must not use ytsearch"
+    assert not called_url.startswith(("ytsearch:", "ytmsearch:")), \
+        "YouTube path must use direct URL, not a search query"
 
 
 def test_failed_download_isolation(window):
@@ -184,7 +184,9 @@ def test_start_button_enabled_all_ready(window, qapp):
 def test_retune_called_on_432(window):
     """DL-04: retune_file() called when hz_mode=432; not called when hz_mode=440."""
     metadata = {"artist": "Portishead", "track_title": "Roads", "source": "Spotify"}
-    with patch("tunebridge.download_track_for_row") as mock_dl, \
+    fake_url = "https://music.youtube.com/watch?v=fake123"
+    with patch("tunebridge._find_best_yt_match", return_value=fake_url), \
+         patch("tunebridge.download_track_for_row") as mock_dl, \
          patch("tunebridge.retune_file") as mock_retune, \
          patch("tunebridge.uuid.uuid4") as mock_uuid:
         mock_dl.return_value = Path("/tmp/tb_test/track.mp3")
@@ -205,7 +207,9 @@ def test_status_transitions_432hz(window):
         lambda r, s: emitted.append((r, s))
     )
     metadata = {"artist": "Portishead", "track_title": "Roads", "source": "Spotify"}
-    with patch("tunebridge.download_track_for_row") as mock_dl, \
+    fake_url = "https://music.youtube.com/watch?v=fake"
+    with patch("tunebridge._find_best_yt_match", return_value=fake_url), \
+         patch("tunebridge.download_track_for_row") as mock_dl, \
          patch("tunebridge.retune_file"), \
          patch("tunebridge.uuid.uuid4") as mock_uuid:
         mock_dl.return_value = Path("/tmp/tb_test/track.mp3")
