@@ -1,55 +1,79 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-18T22:21:00+03:00",
-  "phase": "06",
-  "phase_name": "iBroadcast Upload",
-  "phase_dir": ".planning/phases/06-ibroadcast-upload",
+  "timestamp": "2026-05-19T16:36:00+03:00",
+  "phase": "between-phases",
+  "phase_name": "Codebase hardening between Phase 5 and Phase 6 plan",
+  "phase_dir": ".planning",
   "plan": 0,
   "task": 0,
   "total_tasks": 0,
   "status": "paused",
   "completed_tasks": [
-    {"id": 1, "name": "Phases 1-5 all complete, 80/80 tests GREEN", "status": "done", "commit": "86499fe"},
-    {"id": 2, "name": "Switch to music.youtube.com/search?q= (ytmsearch: unsupported)", "status": "done", "commit": "95c4dab"},
-    {"id": 3, "name": "Fix Windows cp1252 encoding with PYTHONUTF8=1 in subprocess", "status": "done", "commit": "8f3c072"},
-    {"id": 4, "name": "Add view_count log-scale scoring + channel match + penalty list", "status": "done", "commit": "8f3c072"},
-    {"id": 5, "name": "Remove legacy retune_app.py", "status": "done", "commit": "7c505e9"}
+    {"id": 1, "name": "Phases 1-5 shipped, 80/80 tests GREEN pre-review", "status": "done", "commit": "8f3c072"},
+    {"id": 2, "name": "Deep codebase review (12 Critical + 11 Warning + 6 Info)", "status": "done", "commit": "41a7aa3"},
+    {"id": 3, "name": "C-01 _norm_str helper", "status": "done", "commit": "b514ecc"},
+    {"id": 4, "name": "C-02 wire search_duration_ms into get_metadata", "status": "done", "commit": "bafbe64"},
+    {"id": 5, "name": "C-03 bound folder worker wait + guarantee event set", "status": "done", "commit": "239c82b"},
+    {"id": 6, "name": "C-04 atomic-rename save path", "status": "done", "commit": "84711bb"},
+    {"id": 7, "name": "C-05 _folder_total upfront", "status": "done", "commit": "7fd7976"},
+    {"id": 8, "name": "C-06 deterministic file selection", "status": "done", "commit": "d95dbf2"},
+    {"id": 9, "name": "C-07 kill yt-dlp process tree on Windows", "status": "done", "commit": "1f67bbc"},
+    {"id": 10, "name": "C-08 FAILURE_STATUSES metadata-only", "status": "done", "commit": "f27167f"},
+    {"id": 11, "name": "C-09 literal Failed — metadata string", "status": "done", "commit": "3c38857"},
+    {"id": 12, "name": "C-10 debounce FolderConfirmDialog._validate", "status": "done", "commit": "9f0c0b3"},
+    {"id": 13, "name": "C-11 kill subprocess tree + shutdown(wait=True)", "status": "done", "commit": "1e2114d"},
+    {"id": 14, "name": "C-12 merge iTunes results across ES/MX/US", "status": "done", "commit": "47d1845"},
+    {"id": 15, "name": "W-02 cap view-count score at 5.0", "status": "done", "commit": "3b4b604"},
+    {"id": 16, "name": "W-03 word-boundary regex for title+artist", "status": "done", "commit": "b98e9c9"},
+    {"id": 17, "name": "W-04 require mp3 on disk before break", "status": "done", "commit": "c110187"},
+    {"id": 18, "name": "W-05 deep-copy ID3 frames", "status": "done", "commit": "6f4de1f"},
+    {"id": 19, "name": "W-07 doc happens-before for _folder_results", "status": "done", "commit": "388adf7"},
+    {"id": 20, "name": "W-08 correct _on_folder_row_finished docstring", "status": "done", "commit": "126b527"},
+    {"id": 21, "name": "W-09 unwind _start_processing UI lock", "status": "done", "commit": "ceddbf5"},
+    {"id": 22, "name": "W-11 _DeleteAwareTableWidget subclass", "status": "done", "commit": "75cefa9"},
+    {"id": 23, "name": "W-06 marked false positive (emit is load-bearing for _refresh_start_button)", "status": "done", "commit": "41a7aa3"}
   ],
   "remaining_tasks": [
-    {"id": 6, "name": "Plan Phase 6: iBroadcast Upload", "status": "not_started"},
-    {"id": 7, "name": "Execute Phase 6: auth, duplicate check, upload after folder save", "status": "not_started"}
+    {"id": 24, "name": "Push 22 local commits to origin/master", "status": "not_started"},
+    {"id": 25, "name": "Manual UI smoke test of fixes (C-03, C-05, C-11 need runtime PyQt6 validation)", "status": "not_started"},
+    {"id": 26, "name": "Plan Phase 6: iBroadcast Upload (UPL-01, UPL-02)", "status": "not_started"},
+    {"id": 27, "name": "Execute Phase 6", "status": "not_started"}
   ],
   "blockers": [
     {
-      "description": "SSL antivirus proxy interception — git push requires http.sslVerify=false",
+      "description": "SSL antivirus proxy — git push requires http.sslVerify=false",
       "type": "technical",
-      "workaround": "git config --local http.sslVerify false already applied to repo"
+      "workaround": "git config --local http.sslVerify false already set on repo"
+    },
+    {
+      "description": "No Spotify API credentials in .env — currently using oembed only (no ISRC, no duration_ms from Spotify). C-02 now uses iTunes Search API to populate duration_ms.",
+      "type": "external",
+      "workaround": "Optional: set SPOTIFY_CLIENT_ID + SPOTIFY_CLIENT_SECRET. iTunes fallback works without."
     }
   ],
-  "human_actions_pending": [],
+  "human_actions_pending": [
+    {
+      "action": "Manual UI smoke test: paste 3 Spotify URLs, run batch end-to-end, close window mid-batch",
+      "context": "C-03 (event wait timeout), C-05 (batch terminator timing), C-11 (closeEvent process kill) are not test-suite-coverable; need real PyQt6 runtime validation",
+      "blocking": false
+    }
+  ],
   "decisions": [
-    {
-      "decision": "music.youtube.com/search?q= URL for YouTube Music search",
-      "rationale": "ytmsearch: prefix not supported in yt-dlp 2026.03.17",
-      "phase": "04-bonus"
-    },
-    {
-      "decision": "PYTHONUTF8=1 env var in _search_yt_candidates subprocess",
-      "rationale": "Windows cp1252 console corrupts accented chars (é, í, ú) to \\ufffd — breaks title match",
-      "phase": "04-bonus"
-    },
-    {
-      "decision": "view_count as primary quality signal (log scale, capped 9pts)",
-      "rationale": "Official releases have orders of magnitude more views than bass-boosted/lyric/fan uploads",
-      "phase": "04-bonus"
-    },
-    {
-      "decision": "Penalty -3pts for: letra, lyrics, lyric video, karaoke, bass boosted, sped up, slowed, nightcore, 8d audio, reverb, pitched",
-      "rationale": "Prevents non-original versions winning despite higher artist-in-title score",
-      "phase": "04-bonus"
-    }
+    {"decision": "Atomic-rename save path uses tmp_dest.suffix + .tmp + os.replace", "rationale": "Original shutil.move + unlink(missing_ok=True) destroyed user files on partial failure", "phase": "C-04"},
+    {"decision": "_folder_total set to len(jobs) upfront in _start_processing", "rationale": "Per-row increment let batch_done fire after row 1 of N", "phase": "C-05"},
+    {"decision": "Windows process kill via taskkill /F /T /PID — no psutil dependency", "rationale": "Avoid new dep; taskkill is built-in and kills full process tree", "phase": "C-07/C-11"},
+    {"decision": "FAILURE_STATUSES reduced to {Failed — metadata} only", "rationale": "Download/save failures occur after URL is confirmed valid; flipping them to invalid card corrupts user semantic", "phase": "C-08"},
+    {"decision": "QTimer.singleShot 300ms debounce for FolderConfirmDialog._validate", "rationale": "UNC path is_dir() per keystroke froze UI for ~21s on offline SMB", "phase": "C-10"},
+    {"decision": "W-06 NOT applied (false positive)", "rationale": "update_row_metadata.update_row_status is a method call, not a signal emit; _refresh_start_button depends on the explicit row_status_changed emit to enable Start button after METADATA_READY transition", "phase": "review-followup"},
+    {"decision": "_DeleteAwareTableWidget subclass replaces monkey-patch keyPressEvent", "rationale": "PySide6 typed event dispatch may bypass Python attribute lookup; monkey-patch was fragile", "phase": "W-11"}
   ],
-  "uncommitted_files": [],
-  "next_action": "Run /gsd-plan-phase for Phase 6: iBroadcast Upload (auth, duplicate check, upload after folder save). Requirements: UPL-01, UPL-02 in REQUIREMENTS.md.",
-  "context_notes": "All 5 phases complete. Spotify search now uses music.youtube.com with scored matching — tested on Bad Gyal, Vicco, Quevedo, El Alfa. Phase 6 is the final phase for v1.0. No uncommitted work."
+  "uncommitted_files": [
+    ".planning/phases/04-download-pipeline/04-PATTERNS.md (untracked)",
+    ".planning/phases/04-download-pipeline/04-VALIDATION.md (untracked)",
+    "mockup.txt (untracked, noise)",
+    "research.txt (untracked, noise)",
+    "nul (untracked, Windows null-device artifact)"
+  ],
+  "next_action": "Run manual UI smoke test on the fixes, then push to origin/master (22 commits ahead). Then /gsd-plan-phase for Phase 6.",
+  "context_notes": "Codebase went from 80 -> 88 tests (8 new tests for fixes). 21 fix commits + 1 false-positive doc commit = 22 ahead of origin. tunebridge.py is now ~1660 lines (was 1552). Phase 6 (iBroadcast Upload) is the final phase for v1.0 — auth, duplicate check, upload-after-folder-save. The full review report lives at .planning/CODEBASE-REVIEW-2026-05-19.md with finding-status annotations."
 }
