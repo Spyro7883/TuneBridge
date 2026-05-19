@@ -158,11 +158,13 @@ _download_lock = threading.Lock()   # Serializes yt-dlp subprocess — browser c
 _dialog_lock   = threading.Lock()   # Serializes folder dialogs — one at a time (D-01)
 _BROWSER_FALLBACKS: tuple[str, ...] = ("firefox", "chrome", "edge", "brave", "chromium", "opera")
 
-# WR-04: Both terminal-failure statuses that must trigger _on_row_failed callback
+# C-08: Only metadata failures should reclassify a row from valid -> invalid.
+# Download and save failures occur AFTER the URL was confirmed valid, so flipping
+# the stat-card category corrupts the user-facing "Invalid URLs" semantic.
+# Sole caller is BatchTable.update_row_status, which invokes _on_row_failed when
+# a status hits this set — wired to decrement valid + increment invalid.
 FAILURE_STATUSES: frozenset[str] = frozenset({
     "Failed — metadata",
-    "Failed — download",
-    "Failed — save",
 })
 
 

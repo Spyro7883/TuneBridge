@@ -281,3 +281,35 @@ def test_download_returns_correct_file_when_multiple_mp3s_present(tmp_path):
     assert result.name.startswith(captured_token["t"]), \
         f"Got {result.name} but should have started with the per-call token"
     assert stale.exists(), "stale unrelated mp3 must not be returned"
+
+
+def test_failed_save_preserves_valid_card_count(window):
+    """C-08: 'Failed — save' must NOT flip a row from valid → invalid.
+
+    Save failures occur after the URL was already classified as valid (it
+    fetched metadata and downloaded successfully); only metadata failures
+    should reclassify a row in the stat cards.
+    """
+    window._card_valid.set_count(3)
+    window._card_invalid.set_count(0)
+    # Add a row with a known status item so update_row_status can flip it.
+    from PySide6.QtWidgets import QTableWidgetItem
+    window.table._table.setRowCount(1)
+    window.table._table.setItem(0, 0, QTableWidgetItem("Some Track"))
+    window.table._table.setItem(0, 1, QTableWidgetItem("Spotify"))
+    window.table._table.setItem(0, 2, QTableWidgetItem("Saving"))
+
+    window.table.update_row_status(0, SongStatus.FAILED_SAVE.value)
+
+    assert window._card_valid.count() == 3, (
+        f"valid count must remain 3 after Failed — save, got {window._card_valid.count()}"
+    )
+    assert window._card_invalid.count() == 0, (
+        f"invalid count must remain 0 after Failed — save, got {window._card_invalid.count()}"
+    )
+
+    # Sanity check the inverse: Failed — metadata SHOULD flip the cards.
+    window.table._table.setItem(0, 2, QTableWidgetItem("Fetching metadata"))
+    window.table.update_row_status(0, "Failed — metadata")
+    assert window._card_valid.count() == 2, "Failed — metadata must decrement valid"
+    assert window._card_invalid.count() == 1, "Failed — metadata must increment invalid"
