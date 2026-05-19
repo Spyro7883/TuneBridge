@@ -28,7 +28,7 @@ import requests
 import soundfile as sf
 import yt_dlp
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -1034,10 +1034,23 @@ class FolderConfirmDialog(QDialog):
         btn_row.addWidget(skip_btn)
         layout.addLayout(btn_row)
 
+        # C-10: debounce is_dir() check via single-shot timer. Every textChanged
+        # restarts the 300ms timer; only the last keystroke triggers the
+        # synchronous SMB/UNC stat. Without this, typing \\offline-server\share
+        # freezes the dialog for the full SMB timeout (~21s) per character.
+        self._validate_timer = QTimer(self)
+        self._validate_timer.setSingleShot(True)
+        self._validate_timer.setInterval(300)
+        self._validate_timer.timeout.connect(self._run_validate)
         self._path_edit.textChanged.connect(self._validate)
-        self._validate(self._path_edit.text())   # set initial button state
+        self._run_validate()   # set initial button state without waiting on timer
 
-    def _validate(self, text: str) -> None:
+    def _validate(self, _text: str = "") -> None:
+        """Restart debounce timer; the actual is_dir() check runs in _run_validate."""
+        self._validate_timer.start()
+
+    def _run_validate(self) -> None:
+        text = self._path_edit.text()
         # CRITICAL: check strip() != '' BEFORE is_dir() — Path('').is_dir() is True on Windows (Pitfall 1)
         valid = bool(text.strip()) and Path(text.strip()).is_dir()
         self._confirm_btn.setEnabled(valid)

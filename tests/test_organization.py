@@ -60,6 +60,8 @@ def test_confirm_disabled_empty_text(qapp):
     """ORG-02/V5: Confirm button disabled when QLineEdit is empty."""
     dlg = FolderConfirmDialog("Test Song", None)
     dlg._path_edit.setText("")
+    # C-10: debounce timer defers is_dir() check by 300ms; flush synchronously.
+    dlg._run_validate()
     assert not dlg._confirm_btn.isEnabled()
     dlg.close()
 
@@ -68,6 +70,8 @@ def test_confirm_disabled_nonexistent_path(qapp, tmp_path):
     """ORG-02/V5: Confirm button disabled when path does not exist on disk."""
     dlg = FolderConfirmDialog("Test Song", None)
     dlg._path_edit.setText(str(tmp_path / "does_not_exist"))
+    # C-10: debounce timer defers is_dir() check by 300ms; flush synchronously.
+    dlg._run_validate()
     assert not dlg._confirm_btn.isEnabled()
     dlg.close()
 
@@ -76,6 +80,8 @@ def test_confirm_enabled_valid_dir(qapp, tmp_path):
     """ORG-02/V5: Confirm button enabled when path is an existing directory."""
     dlg = FolderConfirmDialog("Test Song", None)
     dlg._path_edit.setText(str(tmp_path))
+    # C-10: debounce timer defers is_dir() check by 300ms; flush synchronously.
+    dlg._run_validate()
     assert dlg._confirm_btn.isEnabled()
     dlg.close()
 
