@@ -1331,7 +1331,13 @@ class TuneBridgeApp(QMainWindow):
 
             if not self._closing.is_set():
                 self._dispatcher.folder_requested.emit(row_id)    # main thread shows dialog
-                ev.wait()                                         # block until _show_folder_dialog sets event
+                # C-03: bounded wait — if _show_folder_dialog raises before
+                # ev.set(), the worker would deadlock indefinitely under the
+                # dialog lock, blocking all queued folder workers.
+                if not ev.wait(timeout=300) and not self._closing.is_set():
+                    logging.getLogger(__name__).warning(
+                        "Folder dialog timed out for row %d — treating as skip", row_id
+                    )
         # Lock released — I/O and status updates handled by _show_folder_dialog on main thread.
 
     def _show_folder_dialog(self, row_id: int) -> None:
@@ -1342,22 +1348,29 @@ class TuneBridgeApp(QMainWindow):
         then performs the file I/O (move or skip) on the main thread.
         NEVER call this from a worker thread — dlg.exec() requires the main thread event loop (Pitfall 2).
         """
-        title = self.table.get_row_title(row_id)
-
-        dlg = FolderConfirmDialog(
-            song_title=title,
-            proposed=self._last_folder,     # D-12/D-13: None on first song, last path thereafter
-            parent=self,
-        )
-        dlg.exec()   # nested event loop — safe on main thread only (Pitfall 2)
-
-        result = dlg.result_path()          # Path or None
-        if result is not None:
-            self._last_folder = result      # update session default (D-12, D-14)
-
-        self._folder_results[row_id] = result
-        if row_id in self._folder_events:
-            self._folder_events[row_id].set()   # unblock _folder_worker
+        # C-03: guarantee the worker is unblocked even if dialog construction
+        # or exec raises. Outer try/finally ensures ev.set() always runs.
+        result: Path | None = None
+        try:
+            title = self.table.get_row_title(row_id)
+            dlg = FolderConfirmDialog(
+                song_title=title,
+                proposed=self._last_folder,     # D-12/D-13: None on first song, last path thereafter
+                parent=self,
+            )
+            dlg.exec()   # nested event loop — safe on main thread only (Pitfall 2)
+            result = dlg.result_path()          # Path or None
+            if result is not None:
+                self._last_folder = result      # update session default (D-12, D-14)
+        except Exception as exc:
+            logging.getLogger(__name__).exception(
+                "Folder dialog raised for row %d: %s", row_id, exc
+            )
+            result = None
+        finally:
+            self._folder_results[row_id] = result
+            if row_id in self._folder_events:
+                self._folder_events[row_id].set()   # unblock _folder_worker (C-03)
 
         # Perform I/O on main thread (D-09 / D-06)
         try:
