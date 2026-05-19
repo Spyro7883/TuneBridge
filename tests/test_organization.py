@@ -253,6 +253,30 @@ def test_dialog_lock_blocks_concurrent_acquisition():
     assert not acquired, "Lock was acquirable while held by another thread — no mutual exclusion"
 
 
+def test_folder_batch_done_waits_for_all_downloads(window):
+    """C-05: folder_batch_done must NOT fire until ALL rows finished, even if row 0 saves first."""
+    # Simulate 3-row batch with _folder_total preset (C-05 fix)
+    window._download_total = 3
+    window._download_done = 0
+    window._download_failed = 0
+    window._folder_total = 3
+    window._folder_done = 0
+    window._folder_skipped = 0
+    window._folder_failed = 0
+
+    emitted = []
+    window._dispatcher.folder_batch_done.connect(lambda: emitted.append("done"))
+
+    # Row 0 finishes the folder dialog FIRST while rows 1, 2 still downloading
+    window._on_folder_row_finished(0, SongStatus.UPLOADING.value)
+    assert emitted == [], "folder_batch_done fired before rows 1, 2 reached AWAITING (C-05 regression)"
+
+    # Rows 1, 2 also finish
+    window._on_folder_row_finished(1, SongStatus.UPLOADING.value)
+    window._on_folder_row_finished(2, SongStatus.SKIPPED.value)
+    assert emitted == ["done"], "folder_batch_done should fire exactly once after all rows resolved"
+
+
 def test_save_does_not_clobber_existing_file_on_partial_failure(window, tmp_path):
     """C-04: if shutil.move fails mid-save, the user's pre-existing file at dest is preserved."""
     temp_mp3 = tmp_path / "track.mp3"
