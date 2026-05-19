@@ -545,17 +545,21 @@ class ItunesClient:
         """
         try:
             term = urllib.parse.quote(f"{artist} {title}")
-            # ES/MX stores first for broader international coverage, then US
+            # C-12: collect across ES/MX/US stores so a regional metadata oddity
+            # in one store does not mask a clean match available in another.
+            all_results: list[dict] = []
             for store in ("&country=ES", "&country=MX", ""):
-                resp = requests.get(
-                    f"https://itunes.apple.com/search?term={term}&entity=song&limit=5{store}",
-                    timeout=8,
-                )
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
-                if results:
-                    break
-            if not results:
+                try:
+                    resp = requests.get(
+                        f"https://itunes.apple.com/search?term={term}&entity=song&limit=5{store}",
+                        timeout=8,
+                    )
+                    resp.raise_for_status()
+                    all_results.extend(resp.json().get("results", []))
+                except Exception:
+                    # Per-store failure should not block the other stores.
+                    continue
+            if not all_results:
                 return None
 
             title_n = _norm_str(title)
@@ -564,7 +568,7 @@ class ItunesClient:
             if "," in artist:
                 artist_variants.append(_norm_str(artist.split(",")[0].strip()))
 
-            for r in results:
+            for r in all_results:
                 r_artist = _norm_str(r.get("artistName", ""))
                 r_title  = _norm_str(r.get("trackName", ""))
                 artist_match = any(
