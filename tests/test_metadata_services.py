@@ -104,6 +104,40 @@ def test_itunes_http_error_raises():
             client.get_metadata("https://open.spotify.com/track/x", "track")
 
 
+def test_get_metadata_populates_duration_ms():
+    """C-02: get_metadata for a track must invoke search_duration_ms and include duration_ms."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        # First call: og-tag HTML for /track/
+        og_resp = MagicMock()
+        og_resp.raise_for_status = MagicMock()
+        og_resp.text = _SPOTIFY_TRACK_HTML
+        # Subsequent call(s): iTunes search JSON
+        itunes_resp = MagicMock()
+        itunes_resp.raise_for_status = MagicMock()
+        itunes_resp.json.return_value = {
+            "results": [
+                {"artistName": "The Weeknd", "trackName": "Blinding Lights", "trackTimeMillis": 200040}
+            ]
+        }
+        mock_get.side_effect = [og_resp, itunes_resp, itunes_resp, itunes_resp]
+        result = client.get_metadata("https://open.spotify.com/track/x", "track")
+    assert "duration_ms" in result
+    assert result["duration_ms"] == 200040
+
+
+def test_get_metadata_album_does_not_query_duration():
+    """C-02: album fetches must NOT call search_duration_ms (album-level durations meaningless)."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.text = _SPOTIFY_ALBUM_HTML
+        result = client.get_metadata("https://open.spotify.com/album/x", "album")
+    # Only one call (the OG-tag fetch) — no iTunes lookup
+    assert mock_get.call_count == 1
+    assert "duration_ms" not in result
+
+
 def test_itunes_search_duration_ms_returns_int_on_match():
     """C-01: search_duration_ms must NOT raise NameError on _norm_str; returns trackTimeMillis on fuzzy match."""
     client = ItunesClient()

@@ -572,11 +572,15 @@ class ItunesClient:
                 "album":        title,
                 "release_type": "album",
             }
+        # C-02: enrich track metadata with iTunes duration for YT candidate scoring.
+        # Failure returns None — _find_best_yt_match handles None gracefully.
+        duration_ms = self.search_duration_ms(artist, title) if (artist and title) else None
         return {
             "artist":       artist,
             "track_title":  title,
             "album":        "",
             "release_type": "single",
+            "duration_ms":  duration_ms,
         }
 
 
@@ -1273,7 +1277,7 @@ class TuneBridgeApp(QMainWindow):
             if url_type == "Spotify":
                 artist      = _sanitise_search_term(metadata.get("artist", ""))
                 title       = _sanitise_search_term(metadata.get("track_title", ""))
-                duration_ms = metadata.get("duration_ms", 0)
+                duration_ms = metadata.get("duration_ms") or 0
                 yt_url = _find_best_yt_match(title, artist, duration_ms=duration_ms)
                 if yt_url is None:
                     raise RuntimeError(
