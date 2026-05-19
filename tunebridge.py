@@ -1621,28 +1621,44 @@ class TuneBridgeApp(QMainWindow):
         self._btn_440.setEnabled(False)
         self._btn_432.setEnabled(False)
 
-        # Reset batch counters
-        # C-05: _folder_total is set up-front to job count, not incremented
-        # per AWAITING. Failed downloads decrement _folder_total instead
-        # (they never produce a folder dialog).
-        self._download_total   = len(jobs)
-        self._download_done    = 0
-        self._download_failed  = 0
-        self._folder_total     = len(jobs)
-        self._folder_done      = 0
-        self._folder_skipped   = 0
-        self._folder_failed    = 0
+        # W-09: if setup raises (e.g. _executor.submit hits a shutdown executor
+        # from a parallel closeEvent), unwind UI lock so the user isn't trapped.
+        try:
+            # Reset batch counters
+            # C-05: _folder_total is set up-front to job count, not incremented
+            # per AWAITING. Failed downloads decrement _folder_total instead
+            # (they never produce a folder dialog).
+            self._download_total   = len(jobs)
+            self._download_done    = 0
+            self._download_failed  = 0
+            self._folder_total     = len(jobs)
+            self._folder_done      = 0
+            self._folder_skipped   = 0
+            self._folder_failed    = 0
 
-        # Connect batch-completion tracker (disconnect guard handled in _on_download_row_finished)
-        self._dispatcher.row_status_changed.connect(self._on_download_row_finished)
+            # Connect batch-completion tracker (disconnect guard handled in _on_download_row_finished)
+            self._dispatcher.row_status_changed.connect(self._on_download_row_finished)
 
-        self.statusBar().showMessage(f"Downloading 0 / {self._download_total}…")
+            self.statusBar().showMessage(f"Downloading 0 / {self._download_total}…")
 
-        # Submit one worker per row — yt-dlp serialized inside download_track_for_row (D-07)
-        for row_id, url, url_type, metadata in jobs:
-            self._executor.submit(
-                self._download_worker, row_id, url, url_type, metadata, hz_mode
+            # Submit one worker per row — yt-dlp serialized inside download_track_for_row (D-07)
+            for row_id, url, url_type, metadata in jobs:
+                self._executor.submit(
+                    self._download_worker, row_id, url, url_type, metadata, hz_mode
+                )
+        except Exception as exc:
+            logging.getLogger(__name__).exception(
+                "_start_processing setup failed; unlocking UI: %s", exc
             )
+            try:
+                self._dispatcher.row_status_changed.disconnect(self._on_download_row_finished)
+            except (TypeError, RuntimeError):
+                pass   # was never connected
+            self._paste_box.setReadOnly(False)
+            self._btn_start.setEnabled(True)
+            self._btn_440.setEnabled(True)
+            self._btn_432.setEnabled(True)
+            self.statusBar().showMessage("Failed to start — see log")
 
     def closeEvent(self, event) -> None:
         """Shutdown thread pool and clean up leftover temp files on window close (D-04, D-12)."""
