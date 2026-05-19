@@ -291,21 +291,35 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
 
     def _run_attempt(cmd: list[str]) -> tuple[bool, int]:
         timed_out = False
-        proc = subprocess.Popen(
-            cmd,
+        popen_kwargs = dict(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
         )
+        # C-07: Windows-specific — hide the console window for spawned yt-dlp
+        # (also matches I-01) and let taskkill /T traverse the process tree.
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        proc = subprocess.Popen(cmd, **popen_kwargs)
 
         def _kill() -> None:
+            # C-07: proc.kill() leaves grandchildren (ffmpeg) alive on Windows,
+            # which keep stdout open and deadlock proc.stdout.read(). taskkill
+            # /T terminates the whole process tree.
             nonlocal timed_out
             try:
                 if proc.poll() is None:
                     timed_out = True
-                    proc.kill()
+                    if sys.platform == "win32":
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            capture_output=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                        )
+                    else:
+                        proc.kill()
             except Exception:
                 pass
 
