@@ -1434,6 +1434,9 @@ class TuneBridgeApp(QMainWindow):
             )
             result = None
         finally:
+            # W-07: no lock around _folder_results write. Happens-before is
+            # established by Event.set() (here) → Event.wait() (in _folder_worker);
+            # the worker only reads _folder_results[row_id] after wait() returns.
             self._folder_results[row_id] = result
             if row_id in self._folder_events:
                 self._folder_events[row_id].set()   # unblock _folder_worker (C-03)
