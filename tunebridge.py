@@ -270,12 +270,17 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # C-06: prefix every output file with a per-call token so we can identify
+    # the exact file produced by this invocation. Avoids relying on mtime
+    # (Windows 16ms resolution → tied/out-of-order mtimes possible) and
+    # ignores any unrelated mp3s already present in out_dir.
+    out_token = f"tb_{uuid.uuid4().hex[:8]}"
     base_cmd = [
         ytdlp, "--no-playlist",
         "--no-check-certificate",
         "--js-runtimes", "node",               # Node.js required for YouTube n-challenge (EJS)
         "-x", "--audio-format", "mp3", "--audio-quality", "192K",
-        "-o", str(out_dir / "%(title)s.%(ext)s"),
+        "-o", str(out_dir / f"{out_token}_%(title)s.%(ext)s"),
         search_url,
     ]
 
@@ -324,7 +329,9 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
         else:
             raise RuntimeError("yt-dlp download failed on all browser configurations.")
 
-    mp3s = sorted(out_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # C-06: glob only files we produced this call. Mtime-based newest-wins was
+    # non-deterministic on Windows and could shadow prior files in out_dir.
+    mp3s = sorted(out_dir.glob(f"{out_token}_*.mp3"))
     return mp3s[0] if mp3s else None
 
 
