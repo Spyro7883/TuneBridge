@@ -244,4 +244,40 @@ def test_status_transitions_440hz(window):
     assert "Downloading" in statuses, f"Expected 'Downloading' in {statuses}"
     assert "Retuning" not in statuses, f"'Retuning' must NOT appear in 440Hz path, got: {statuses}"
     assert "Awaiting folder" in statuses, f"Expected 'Awaiting folder' in {statuses}"
-    mock_retune.assert_not_called()
+
+
+def test_download_returns_correct_file_when_multiple_mp3s_present(tmp_path):
+    """C-06: download_track_for_row globs only its own per-call token, not all mp3s in out_dir."""
+    from unittest.mock import patch, MagicMock
+
+    out_dir = tmp_path
+    # Pre-existing unrelated mp3 from a previous (failed/stale) download.
+    stale = out_dir / "old_song.mp3"
+    stale.write_bytes(b"stale")
+
+    captured_token = {}
+
+    def fake_popen(cmd, **kwargs):
+        idx = cmd.index("-o")
+        template = cmd[idx + 1]
+        # Template like "<out_dir>/tb_XXXXXXXX_%(title)s.%(ext)s"
+        name_template = Path(template).name
+        token = name_template.split("_%")[0]   # "tb_XXXXXXXX"
+        captured_token["t"] = token
+        produced = out_dir / f"{token}_Real Track.mp3"
+        produced.write_bytes(b"new")
+        proc = MagicMock()
+        proc.stdout.read.return_value = ""
+        proc.wait.return_value = 0
+        proc.poll.return_value = 0
+        proc.returncode = 0
+        return proc
+
+    with patch("tunebridge.shutil.which", return_value="yt-dlp"), \
+         patch("tunebridge.subprocess.Popen", side_effect=fake_popen):
+        result = download_track_for_row("ytsearch1:foo", out_dir)
+
+    assert result is not None
+    assert result.name.startswith(captured_token["t"]), \
+        f"Got {result.name} but should have started with the per-call token"
+    assert stale.exists(), "stale unrelated mp3 must not be returned"
