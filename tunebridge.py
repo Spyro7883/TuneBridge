@@ -931,7 +931,10 @@ class BatchTable(QWidget):
             SongStatus.FAILED_SAVE.value,
             SongStatus.FAILED_DOWNLOAD.value,
         }
-        _INVALID_COMPLETED = {SongStatus.FAILED_METADATA.value} if hasattr(SongStatus, "FAILED_METADATA") else set()
+        # C-09: SongStatus has no FAILED_METADATA member; the value is the literal
+        # string set by the metadata worker. The previous hasattr() check always
+        # evaluated False so invalid_removed was permanently 0 — invalid card drifted.
+        _INVALID_COMPLETED = {"Failed — metadata"}
         rows_to_remove = sorted(
             [
                 r for r in range(self._table.rowCount())
