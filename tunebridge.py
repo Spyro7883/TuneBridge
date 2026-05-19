@@ -432,10 +432,13 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
             elif diff <= 5:
                 score += 2.0
 
-        if title_l in vid_l:
+        # W-03: word-boundary match so short titles like "Run" don't match
+        # "Running"/"Marathon Runner"/"Rerun".
+        if title_l and re.search(rf"\b{re.escape(title_l)}\b", vid_l):
             score += 5.0
         # Weak signal: official YT Music songs often have simple titles without artist prefix
-        if artist_key and artist_key in vid_l:
+        # W-03: same word-boundary fix for short artist keys ("Bee", "Yes", "Air").
+        if artist_key and re.search(rf"\b{re.escape(artist_key)}\b", vid_l):
             score += 1.0
         if artist_key and artist_key in c.get("channel", "").lower():
             score += 3.0
