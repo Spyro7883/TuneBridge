@@ -123,7 +123,11 @@ def test_skip_does_not_block_other_rows(window, tmp_path):
 
 
 def test_confirm_calls_shutil_move(window, tmp_path):
-    """ORG-04: shutil.move called with str(temp_path) and str(dest_folder) on confirm."""
+    """ORG-04: shutil.move called to stage temp to dest_dir/<name>.tmp on confirm.
+
+    Updated for C-04: atomic-rename pattern moves to a .tmp sidecar first,
+    then os.replace renames to final. Asserts the staging move call.
+    """
     temp_mp3 = tmp_path / "track.mp3"
     temp_mp3.write_bytes(b"fake")
     dest = tmp_path / "dest"
@@ -135,18 +139,23 @@ def test_confirm_calls_shutil_move(window, tmp_path):
         instance = MagicMock()
         instance.result_path.return_value = dest
         MockDlg.return_value = instance
-        with patch("tunebridge.shutil.move", return_value=str(dest / "track.mp3")) as mock_move:
+        with patch("tunebridge.shutil.move") as mock_move, \
+             patch("tunebridge.os.replace") as mock_replace:
             window._show_folder_dialog(3)
-    mock_move.assert_called_once_with(str(temp_mp3), str(dest))
+    expected_tmp = str(dest / "track.mp3.tmp")
+    mock_move.assert_called_once_with(str(temp_mp3), expected_tmp)
+    mock_replace.assert_called_once_with(expected_tmp, str(dest / "track.mp3"))
 
 
 def test_saved_paths_populated_after_move(window, tmp_path):
-    """ORG-04: window._saved_paths[row_id] is a Path after successful confirm."""
+    """ORG-04: window._saved_paths[row_id] is a Path after successful confirm.
+
+    Updated for C-04: mocks both shutil.move (staging) and os.replace (atomic rename).
+    """
     temp_mp3 = tmp_path / "track.mp3"
     temp_mp3.write_bytes(b"fake")
     dest = tmp_path / "dest2"
     dest.mkdir()
-    final = dest / "track.mp3"
     window._temp_paths[4] = temp_mp3
     window._folder_events[4] = threading.Event()
     window._folder_results[4] = None
@@ -154,7 +163,7 @@ def test_saved_paths_populated_after_move(window, tmp_path):
         instance = MagicMock()
         instance.result_path.return_value = dest
         MockDlg.return_value = instance
-        with patch("tunebridge.shutil.move", return_value=str(final)):
+        with patch("tunebridge.shutil.move"), patch("tunebridge.os.replace"):
             window._show_folder_dialog(4)
     assert isinstance(window._saved_paths.get(4), Path)
 
@@ -242,6 +251,29 @@ def test_dialog_lock_blocks_concurrent_acquisition():
     t.join(timeout=2)
 
     assert not acquired, "Lock was acquirable while held by another thread — no mutual exclusion"
+
+
+def test_save_does_not_clobber_existing_file_on_partial_failure(window, tmp_path):
+    """C-04: if shutil.move fails mid-save, the user's pre-existing file at dest is preserved."""
+    temp_mp3 = tmp_path / "track.mp3"
+    temp_mp3.write_bytes(b"new content")
+    dest = tmp_path / "dest5"
+    dest.mkdir()
+    existing = dest / "track.mp3"
+    existing.write_bytes(b"original user data")  # pre-existing file
+
+    window._temp_paths[8] = temp_mp3
+    window._folder_events[8] = threading.Event()
+    window._folder_results[8] = None
+    with patch("tunebridge.FolderConfirmDialog") as MockDlg:
+        instance = MagicMock()
+        instance.result_path.return_value = dest
+        MockDlg.return_value = instance
+        # Simulate shutil.move failing (disk full, AV lock, etc.) — must not have touched original
+        with patch("tunebridge.shutil.move", side_effect=OSError("disk full")):
+            window._show_folder_dialog(8)
+    assert existing.exists(), "C-04 regression: original user file was destroyed on partial failure"
+    assert existing.read_bytes() == b"original user data"
 
 
 def test_folder_dialog_unblocks_worker_on_exception(window, tmp_path):

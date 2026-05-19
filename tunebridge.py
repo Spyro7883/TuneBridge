@@ -1395,10 +1395,17 @@ class TuneBridgeApp(QMainWindow):
                         self._dispatcher.row_status_changed.emit(row_id, SongStatus.FAILED_SAVE.value)
                     self._on_folder_row_finished(row_id, SongStatus.FAILED_SAVE.value)
                     return
-                # Windows: shutil.move raises if dest_dir/filename already exists — remove first
+                # C-04: atomic-rename pattern — never delete the user's existing
+                # file until the new file is successfully placed. shutil.move
+                # copies to a .tmp sidecar; os.replace then performs the rename
+                # atomically (or raises, leaving the user's original intact).
                 dest_candidate = Path(result) / Path(temp).name
-                dest_candidate.unlink(missing_ok=True)
-                final = Path(shutil.move(str(temp), str(result)))  # wrap str return (Pitfall 4)
+                tmp_dest = dest_candidate.with_suffix(dest_candidate.suffix + ".tmp")
+                if tmp_dest.exists():
+                    tmp_dest.unlink(missing_ok=True)
+                shutil.move(str(temp), str(tmp_dest))
+                os.replace(str(tmp_dest), str(dest_candidate))
+                final = dest_candidate
                 self._saved_paths[row_id] = final
                 if not self._closing.is_set():
                     self._dispatcher.row_status_changed.emit(row_id, SongStatus.UPLOADING.value)
