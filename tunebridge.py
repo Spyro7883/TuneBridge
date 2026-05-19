@@ -1486,11 +1486,12 @@ class TuneBridgeApp(QMainWindow):
             self._on_folder_row_finished(row_id, SongStatus.FAILED_SAVE.value)
 
     def _on_folder_row_finished(self, _row_id: int, status: str) -> None:
-        """Track folder dialog batch completion. Called directly from _folder_worker (off main thread).
+        """Track folder dialog batch completion. Called from _show_folder_dialog on the main thread.
 
-        Counters are only written here; this method is called from worker thread so counter
-        increments use no lock (GIL protects int increments in CPython — same assumption as
-        _on_download_row_finished which also runs from worker via direct call pattern).
+        W-08: prior docstring claimed worker-thread invocation and cited a GIL
+        argument. Both wrong — every call site is _show_folder_dialog, which is
+        a Qt slot connected via QueuedConnection and therefore runs on the main
+        thread. No cross-thread access on these counters.
 
         When all rows resolve: emit folder_batch_done(), update status bar. (D-08/D-11)
         """
