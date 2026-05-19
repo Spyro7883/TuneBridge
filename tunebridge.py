@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import copy
 import json
 import logging
 import math
@@ -254,6 +255,11 @@ def retune_file(in_path: Path, out_path: Path) -> None:
             if audio.tags is None:
                 audio.add_tags()
             for key, value in original_tags.items():
+                # W-05: original_tags stores live references to the source
+                # ID3 frames. Mutating .encoding on the reference would mutate
+                # the source frame singleton (and any other view of it).
+                # Copy first, then mutate the copy.
+                value = copy.copy(value)
                 if hasattr(value, 'encoding'):
                     value.encoding = 3  # UTF-8
                 audio.tags.add(value)
