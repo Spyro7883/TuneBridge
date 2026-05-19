@@ -778,6 +778,28 @@ class StatCard(QWidget):
 # ---------------------------------------------------------------------------
 
 
+class _DeleteAwareTableWidget(QTableWidget):
+    """QTableWidget that routes the Delete key to a configurable callback.
+
+    W-11: replaces the prior monkey-patch (`self._table.keyPressEvent = ...`)
+    which relied on PySide6 honouring Python attribute lookup for typed event
+    dispatch — fragile and silently breakable across PySide6 releases.
+    """
+
+    def __init__(self, rows: int, cols: int, parent: QWidget | None = None) -> None:
+        super().__init__(rows, cols, parent)
+        self._on_delete: Callable[[], None] | None = None
+
+    def set_delete_handler(self, handler: Callable[[], None]) -> None:
+        self._on_delete = handler
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Delete and self._on_delete is not None:
+            self._on_delete()
+            return
+        super().keyPressEvent(event)
+
+
 class BatchTable(QWidget):
     COLUMNS = ["Title", "Type", "Status"]
 
@@ -810,7 +832,7 @@ class BatchTable(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self._table = QTableWidget(0, 3)
+        self._table = _DeleteAwareTableWidget(0, 3)
         self._table.setHorizontalHeaderLabels(self.COLUMNS)
         self._table.verticalHeader().hide()
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -825,7 +847,8 @@ class BatchTable(QWidget):
             2, QHeaderView.ResizeMode.ResizeToContents
         )
         self._table.verticalHeader().setDefaultSectionSize(28)
-        self._table.keyPressEvent = self._handle_key
+        # W-11: subclass routes Delete to remove_selected_rows; no monkey-patch.
+        self._table.set_delete_handler(self.remove_selected_rows)
         layout.addWidget(self._table)
 
         self._rows: dict[int, str] = {}
@@ -937,14 +960,6 @@ class BatchTable(QWidget):
         if self._on_rows_removed:
             self._on_rows_removed(valid_removed, invalid_removed)
         return len(rows)
-
-    def _handle_key(self, event) -> None:
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QTableWidget
-        if event.key() == Qt.Key.Key_Delete:
-            self.remove_selected_rows()
-        else:
-            QTableWidget.keyPressEvent(self._table, event)
 
     def remove_completed_rows(self) -> tuple[int, int]:
         """Remove rows that are in a terminal completed state (processed batch).
