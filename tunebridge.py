@@ -158,6 +158,11 @@ _download_lock = threading.Lock()   # Serializes yt-dlp subprocess — browser c
 _dialog_lock   = threading.Lock()   # Serializes folder dialogs — one at a time (D-01)
 _BROWSER_FALLBACKS: tuple[str, ...] = ("firefox", "chrome", "edge", "brave", "chromium", "opera")
 
+# C-11: live yt-dlp subprocesses, so closeEvent can taskkill /T the whole tree
+# before executor.shutdown(wait=True) — otherwise rmtree of _session_tmp races
+# the still-writing ffmpeg children and leaks files in %TEMP%.
+_active_procs: set[subprocess.Popen] = set()
+
 # C-08: Only metadata failures should reclassify a row from valid -> invalid.
 # Download and save failures occur AFTER the URL was confirmed valid, so flipping
 # the stat-card category corrupts the user-facing "Invalid URLs" semantic.
@@ -305,6 +310,9 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
         if sys.platform == "win32":
             popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         proc = subprocess.Popen(cmd, **popen_kwargs)
+        # C-11: register Popen so closeEvent can taskkill /T the tree before
+        # executor shutdown. Module-level set; we add/remove inside _run_attempt.
+        _active_procs.add(proc)
 
         def _kill() -> None:
             # C-07: proc.kill() leaves grandchildren (ffmpeg) alive on Windows,
@@ -332,6 +340,7 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
             proc.wait()
         finally:
             timer.cancel()
+            _active_procs.discard(proc)
         return timed_out, proc.returncode
 
     with _download_lock:
@@ -1619,7 +1628,25 @@ class TuneBridgeApp(QMainWindow):
         # Unblock any _folder_worker waiting on a dialog — None sentinel already in _folder_results (D-04)
         for ev in list(self._folder_events.values()):
             ev.set()
-        self._executor.shutdown(wait=False)
+        # C-11: kill yt-dlp + ffmpeg trees BEFORE shutdown(wait=True). Without this,
+        # workers block on proc.stdout.read() until ffmpeg post-processing finishes
+        # (potentially minutes), and rmtree races writes into _session_tmp.
+        for proc in list(_active_procs):
+            try:
+                if proc.poll() is None:
+                    if sys.platform == "win32":
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            capture_output=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                        )
+                    else:
+                        proc.kill()
+            except Exception:
+                pass
+        # C-11: wait=True + cancel_futures prevents the race where workers hold
+        # _temp_paths_lock / _dialog_lock while rmtree runs.
+        self._executor.shutdown(wait=True, cancel_futures=True)
         try:
             shutil.rmtree(self._session_tmp, ignore_errors=True)
         except Exception:
