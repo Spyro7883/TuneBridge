@@ -1462,10 +1462,15 @@ class TuneBridgeApp(QMainWindow):
 
         if status == SongStatus.AWAITING.value:
             self._download_done += 1
-            self._folder_total += 1
             self._executor.submit(self._folder_worker, _row_id)   # chain into Phase 5 (D-02)
         else:
             self._download_failed += 1
+            # C-05: failed download never produces a folder dialog — shrink
+            # _folder_total so folder_batch_done fires correctly for remaining
+            # rows. Was originally incrementing _folder_total per AWAITING,
+            # which let batch_done fire early when row 1's dialog resolved
+            # before rows 2/3 reached AWAITING.
+            self._folder_total = max(0, self._folder_total - 1)
         finished = self._download_done + self._download_failed
 
         if finished < self._download_total:
@@ -1547,10 +1552,13 @@ class TuneBridgeApp(QMainWindow):
         self._btn_432.setEnabled(False)
 
         # Reset batch counters
+        # C-05: _folder_total is set up-front to job count, not incremented
+        # per AWAITING. Failed downloads decrement _folder_total instead
+        # (they never produce a folder dialog).
         self._download_total   = len(jobs)
         self._download_done    = 0
         self._download_failed  = 0
-        self._folder_total     = 0
+        self._folder_total     = len(jobs)
         self._folder_done      = 0
         self._folder_skipped   = 0
         self._folder_failed    = 0
