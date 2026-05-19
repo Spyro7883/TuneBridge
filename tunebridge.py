@@ -349,7 +349,11 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
             timed_out, rc = _run_attempt(cmd)
             if timed_out:
                 raise RuntimeError("yt-dlp download timed out.")
-            if rc == 0:
+            # W-04: yt-dlp can return rc=0 on ytsearch1: with no results
+            # (prints "no results" to stderr, produces no file). Only treat
+            # as success when an mp3 actually landed in out_dir — otherwise
+            # fall through to the next cookie variant.
+            if rc == 0 and any(out_dir.glob(f"{out_token}_*.mp3")):
                 break
         else:
             raise RuntimeError("yt-dlp download failed on all browser configurations.")
