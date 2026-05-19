@@ -439,10 +439,11 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
             score += 1.0
         if artist_key and artist_key in c.get("channel", "").lower():
             score += 3.0
-        # View count: strong signal for official releases vs fan uploads (log scale, cap 9)
+        # View count: tiebreaker, not dominant signal (W-02: lowered cap so
+        # popularity cannot overwhelm content-based title/artist/duration scoring)
         views = c.get("view_count", 0) or 0
         if views > 0:
-            score += min(math.log10(views) * 1.5, 9.0)
+            score += min(math.log10(views), 5.0)
         # Penalise non-original versions
         if any(kw in vid_l for kw in (
             "letra", "lyrics", "lyric video", "karaoke",
