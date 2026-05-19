@@ -242,3 +242,15 @@ def test_dialog_lock_blocks_concurrent_acquisition():
     t.join(timeout=2)
 
     assert not acquired, "Lock was acquirable while held by another thread — no mutual exclusion"
+
+
+def test_folder_dialog_unblocks_worker_on_exception(window, tmp_path):
+    """C-03: if FolderConfirmDialog raises, _show_folder_dialog must still set the event."""
+    window._temp_paths[7] = tmp_path / "nope.mp3"
+    ev = threading.Event()
+    window._folder_events[7] = ev
+    window._folder_results[7] = None
+    with patch("tunebridge.FolderConfirmDialog", side_effect=RuntimeError("boom")):
+        window._show_folder_dialog(7)
+    assert ev.is_set(), "Worker would deadlock — event was not set after dialog raised"
+    assert window._folder_results[7] is None
