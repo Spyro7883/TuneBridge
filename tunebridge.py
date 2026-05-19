@@ -6,12 +6,14 @@ import atexit
 import json
 import logging
 import math
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 import urllib.parse
 import uuid
 from collections.abc import Callable
@@ -168,6 +170,18 @@ def _sanitise_search_term(s: str) -> str:
     """Strip control chars and leading dashes from scraped metadata before ytsearch: query."""
     s = re.sub(r"[\x00-\x1f\x7f]", " ", s)
     return s.strip().lstrip("-")[:100]
+
+
+def _norm_str(s: str) -> str:
+    """Lowercase + strip diacritics + collapse whitespace for fuzzy match (C-01)."""
+    return re.sub(
+        r"\s+",
+        " ",
+        unicodedata.normalize("NFKD", s or "")
+        .encode("ascii", "ignore")
+        .decode()
+        .lower(),
+    ).strip()
 
 
 SRC_A4 = 440.0

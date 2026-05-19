@@ -104,6 +104,20 @@ def test_itunes_http_error_raises():
             client.get_metadata("https://open.spotify.com/track/x", "track")
 
 
+def test_itunes_search_duration_ms_returns_int_on_match():
+    """C-01: search_duration_ms must NOT raise NameError on _norm_str; returns trackTimeMillis on fuzzy match."""
+    client = ItunesClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.json.return_value = {
+            "results": [
+                {"artistName": "Some Artist", "trackName": "Some Track", "trackTimeMillis": 183000}
+            ]
+        }
+        result = client.search_duration_ms("Some Artist", "Some Track")
+    assert result == 183000
+
+
 # ---------------------------------------------------------------------------
 # YoutubeExtractor
 # ---------------------------------------------------------------------------
