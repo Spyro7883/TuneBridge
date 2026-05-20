@@ -470,11 +470,18 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
         vid_l  = c.get("title", "").lower()
 
         if target_s is not None:
-            diff = abs((c.get("duration") or 0) - target_s)
+            vid_dur = (c.get("duration") or 0)
+            diff = abs(vid_dur - target_s)
             if diff <= 2:
                 score += 10.0 - diff * 2
             elif diff <= 5:
                 score += 2.0
+            # Penalise videos significantly longer than the Spotify track —
+            # these are typically music videos with intros/outros not in the song.
+            if vid_dur > target_s + 15:
+                score -= 4.0
+            if vid_dur > target_s + 30:
+                score -= 4.0  # cumulative: -8 total for 30s+ overage
 
         # W-03: word-boundary match so short titles like "Run" don't match
         # "Running"/"Marathon Runner"/"Rerun".
