@@ -103,6 +103,8 @@ def test_status_enum_values():
         "Failed — download",  # added Phase 4 — D-13
         "Skipped — folder",   # added Phase 5 — D-05
         "Failed — save",      # added Phase 5 — D-10
+        "Already uploaded",   # added Phase 6 — D-07
+        "Failed — upload",    # added Phase 6 — D-14
     ]
     assert [s.value for s in SongStatus] == expected
 
