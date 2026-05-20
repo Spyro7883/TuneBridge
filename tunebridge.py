@@ -1445,7 +1445,10 @@ class TuneBridgeApp(QMainWindow):
 
             _log = logging.getLogger(__name__)
             if url_type == "Spotify":
-                artist      = _sanitise_search_term(metadata.get("artist", ""))
+                # Use only first artist for YT search — long multi-artist strings
+                # produce poor YouTube Music results (e.g. remixes with 8 features).
+                artist_raw  = metadata.get("artist", "")
+                artist      = _sanitise_search_term(artist_raw.split(",")[0].strip())
                 title       = _sanitise_search_term(metadata.get("track_title", ""))
                 duration_ms = metadata.get("duration_ms") or 0
                 yt_url = _find_best_yt_match(title, artist, duration_ms=duration_ms)
