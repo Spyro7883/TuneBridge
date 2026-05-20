@@ -353,32 +353,30 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
         # executor shutdown. Module-level set; we add/remove inside _run_attempt.
         _active_procs.add(proc)
 
-        def _kill() -> None:
-            # C-07: proc.kill() leaves grandchildren (ffmpeg) alive on Windows,
-            # which keep stdout open and deadlock proc.stdout.read(). taskkill
-            # /T terminates the whole process tree.
-            nonlocal timed_out
+        def _force_kill() -> None:
+            """Kill yt-dlp + entire child process tree (C-07)."""
             try:
-                if proc.poll() is None:
-                    timed_out = True
-                    if sys.platform == "win32":
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                            capture_output=True,
-                            creationflags=subprocess.CREATE_NO_WINDOW,
-                        )
-                    else:
-                        proc.kill()
+                if sys.platform == "win32":
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                        capture_output=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
+                else:
+                    proc.kill()
             except Exception:
                 pass
 
-        timer = threading.Timer(90, _kill)
-        timer.start()
         try:
-            proc.stdout.read()
-            proc.wait()
+            proc.communicate(timeout=90)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _force_kill()
+            try:
+                proc.communicate(timeout=5)  # drain pipes after kill
+            except subprocess.TimeoutExpired:
+                pass
         finally:
-            timer.cancel()
             _active_procs.discard(proc)
         return timed_out, proc.returncode
 
