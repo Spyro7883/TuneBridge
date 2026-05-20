@@ -527,6 +527,11 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
             "(audio)", "[audio]", "| audio",
         )):
             score += 4.0
+        # Penalise remix/live versions when the Spotify title has no such qualifier
+        if _version_kw is None and any(kw in vid_l for kw in (
+            "remix", "en vivo", "live", "behind the scenes", "concert",
+        )) and not any(kw in title_l for kw in ("remix", "en vivo", "live")):
+            score -= 3.0
 
         scored.append((score, c))
 
