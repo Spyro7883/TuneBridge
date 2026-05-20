@@ -494,9 +494,11 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
 
         # W-03: word-boundary match so short titles like "Run" don't match
         # "Running"/"Marathon Runner"/"Rerun".
-        # Split base title from version qualifier (e.g. "La Curiosidad (Grand Prix Red)")
-        _version_m   = re.search(r"\s*\(([^)]+)\)\s*$", title_l)
-        _base_title  = title_n[: _version_m.start()].strip() if _version_m else title_n
+        # Strip feat. credits first so long titles like "La Curiosidad (feat. DJ Nelson,
+        # ...) - Red Grand Prix Remi" don't break version-qualifier parsing when truncated.
+        _feat_strip  = re.sub(r"\s*[\(\[](feat|ft)\..*", "", title_n, flags=re.IGNORECASE).strip()
+        _version_m   = re.search(r"\s*\(([^)]+)\)\s*$", _feat_strip)
+        _base_title  = _feat_strip[: _version_m.start()].strip() if _version_m else _feat_strip
         _version_kw  = _norm_str(_version_m.group(1)) if _version_m else None
         vid_n        = _norm_str(c.get("title", ""))   # accent-stripped YT title
         if _base_title and re.search(rf"\b{re.escape(_base_title)}\b", vid_n):
@@ -869,9 +871,14 @@ class ItunesClient:
                 "album":        title,
                 "release_type": "album",
             }
-        # C-02: enrich track metadata with iTunes duration for YT candidate scoring.
-        # Failure returns None — _find_best_yt_match handles None gracefully.
-        duration_ms = self.search_duration_ms(artist, title) if (artist and title) else None
+        # C-02: extract duration from Spotify page first (most reliable source);
+        # fall back to iTunes Search API for tracks not on the Spotify web page.
+        duration_ms = None
+        m_dur = re.search(r">(\d{1,2}):(\d{2})</span>", html)
+        if m_dur:
+            duration_ms = (int(m_dur.group(1)) * 60 + int(m_dur.group(2))) * 1000
+        if not duration_ms and artist and title:
+            duration_ms = self.search_duration_ms(artist, title)
         return {
             "artist":       artist,
             "track_title":  title,
