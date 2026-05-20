@@ -2021,6 +2021,7 @@ class TuneBridgeApp(QMainWindow):
         self._executor.submit(
             self._playlist_update_worker,
             playlist_id, playlist_name, pre_ids, user_id, token, 1,
+            self._upload_done,
         )
 
     def _playlist_update_worker(
@@ -2031,6 +2032,7 @@ class TuneBridgeApp(QMainWindow):
         user_id: int,
         token: str,
         attempt: int,
+        expected_count: int = 1,
     ) -> None:
         """Background worker: poll library until new tracks appear, then add to playlist.
 
@@ -2043,8 +2045,13 @@ class TuneBridgeApp(QMainWindow):
         for attempt in range(1, 4):
             new_token, new_user_id, new_library, new_playlists = _ibroadcast_login(username, password)
             new_ids = [int(k) for k in new_library if k not in pre_ids]
-            if new_ids:
+            # Wait until all expected tracks appear (avoid missing slow-processed ones)
+            if len(new_ids) >= expected_count:
                 break
+            if new_ids and attempt == 1:
+                # Found some but not all — retry once more after short wait
+                time.sleep(15)
+                continue
             if attempt < 3:
                 self._dispatcher.status_message.emit(
                     f"Waiting for iBroadcast to process… (check {attempt}/3, retry in 60s)"
