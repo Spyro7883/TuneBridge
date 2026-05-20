@@ -457,8 +457,6 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
     target_s   = duration_ms / 1000.0 if duration_ms else None
     # More candidates when no duration data — increases chance of finding audio version
     candidate_count = 5 if target_s else 8
-    _log = logging.getLogger(__name__)
-    _log.warning("YT search: query=%r target_s=%s count=%d", query, target_s, candidate_count)
     candidates = _search_yt_candidates(query, count=candidate_count)
     # When no duration data, also search with 'audio' appended to guarantee
     # audio-only uploads appear in the candidate pool (they can rank lower in
@@ -550,10 +548,6 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
 
     scored.sort(key=lambda x: -x[0])
     best_score, best = scored[0]
-
-    for s, c in scored[:4]:
-        _log.warning("  cand score=%.1f dur=%ds | %s", s, c.get("duration",0), c.get("title","")[:55])
-    _log.warning("  => selected score=%.1f dur=%ds | %s", best_score, best.get("duration",0), best.get("title","")[:55])
 
     if best_score <= 0:
         return None
