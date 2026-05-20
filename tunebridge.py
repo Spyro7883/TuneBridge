@@ -550,9 +550,47 @@ def _ibroadcast_login(
             return None, None, {}, {}
         token     = data["user"]["token"]
         user_id   = data["user"]["id"]
-        lib       = data.get("library", {})
-        library   = lib.get("tracks", {})
-        playlists = lib.get("playlists", {})
+        # Second call: fetch library (tracks + playlists) using token
+        _base = {
+            "user_id": user_id,
+            "token": token,
+            "client": "tunebridge",
+            "supported_types": 1,
+            "version": "0.0",
+        }
+        lib_resp = requests.post(
+            "https://api.ibroadcast.com/s/JSON/",
+            json={**_base, "mode": "library"},
+            verify=False,
+            timeout=30,
+        )
+        lib_data  = lib_resp.json()
+        supported = lib_data.get("supported", {})
+        lib_sect  = lib_data.get("library", {})
+
+        def _to_dict(raw: dict, fields: list) -> dict:
+            """Convert iBroadcast positional-array items to named-field dicts."""
+            if not fields:
+                return raw
+            return {
+                iid: dict(zip(fields, item)) if isinstance(item, list) else item
+                for iid, item in raw.items()
+            }
+
+        track_fields    = supported.get("tracks",    {}).get("fields", [])
+        playlist_fields = supported.get("playlists", {}).get("fields", [])
+        library   = _to_dict(lib_sect.get("tracks",    {}), track_fields)
+        playlists = _to_dict(lib_sect.get("playlists", {}), playlist_fields)
+
+        _log = logging.getLogger(__name__)
+        _log.warning("iBroadcast library: %d tracks, %d playlists", len(library), len(playlists))
+        if library:
+            sample = next(iter(library.values()))
+            _log.warning("Track sample keys: %s", list(sample.keys()) if isinstance(sample, dict) else type(sample))
+        if playlists:
+            sample_pl = next(iter(playlists.values()))
+            _log.warning("Playlist sample: %s", sample_pl if isinstance(sample_pl, dict) else type(sample_pl))
+
         return token, user_id, library, playlists
     except Exception as exc:
         logging.getLogger(__name__).warning("iBroadcast login failed: %s", exc)
@@ -1179,8 +1217,8 @@ class PlaylistSelectDialog(QDialog):
         self._list.addItem(none_item)
 
         for pid, pdata in playlists.items():
-            name = pdata.get("name", f"Playlist {pid}") if isinstance(pdata, dict) else str(pdata)
-            item = QListWidgetItem(name)
+            raw_name = pdata.get("name", f"Playlist {pid}") if isinstance(pdata, dict) else pid
+            item = QListWidgetItem(str(raw_name))
             item.setData(Qt.ItemDataRole.UserRole, str(pid))
             self._list.addItem(item)
 
@@ -1862,9 +1900,9 @@ class TuneBridgeApp(QMainWindow):
                 self._upload_user_id,
                 self._upload_token,
             )
-            playlist_name = (self._upload_playlists
-                             .get(self._upload_playlist_id, {})
-                             .get("name", "playlist"))
+            playlist_name = str((self._upload_playlists
+                                 .get(self._upload_playlist_id, {})
+                                 .get("name", "playlist")))
             playlist_msg = f" → added to '{playlist_name}'" if ok else " (playlist update failed)"
 
         self.statusBar().showMessage(
