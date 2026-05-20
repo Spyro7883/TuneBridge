@@ -2176,6 +2176,10 @@ class TuneBridgeApp(QMainWindow):
             )
             return   # nothing to do — guard against empty batch
 
+        # Reset per-batch state — prevents stale _saved_paths from previous batches
+        # being re-uploaded if user deleted rows and started a new batch.
+        self._saved_paths.clear()
+
         # Lock UI — no edits during active batch run (D-03)
         self._paste_box.setReadOnly(True)
         self._btn_start.setEnabled(False)
