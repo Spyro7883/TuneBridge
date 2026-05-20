@@ -460,6 +460,13 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
     _log = logging.getLogger(__name__)
     _log.warning("YT search: query=%r target_s=%s count=%d", query, target_s, candidate_count)
     candidates = _search_yt_candidates(query, count=candidate_count)
+    # When no duration data, also search with 'audio' appended to guarantee
+    # audio-only uploads appear in the candidate pool (they can rank lower in
+    # the default search vs music videos with high view counts).
+    if target_s is None:
+        audio_cands = _search_yt_candidates(f"{query} audio", count=4)
+        seen_ids = {c["id"] for c in candidates}
+        candidates = candidates + [c for c in audio_cands if c["id"] not in seen_ids]
     if not candidates:
         return None
     title_l    = title.lower()
