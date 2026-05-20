@@ -184,6 +184,35 @@ def _sanitise_search_term(s: str) -> str:
     return s.strip().lstrip("-")[:100]
 
 
+def _sanitise_filename(s: str) -> str:
+    """Remove characters illegal in Windows/macOS filenames and trim length."""
+    s = re.sub(r'[\\/:*?"<>|]', "_", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s[:80]
+
+
+def _write_id3_tags(file_path: "Path", meta: dict) -> None:
+    """Write ID3 title/artist/album tags to an MP3 using mutagen."""
+    try:
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
+        try:
+            tags = ID3(str(file_path))
+        except ID3NoHeaderError:
+            tags = ID3()
+        title  = str(meta.get("track_title", "") or meta.get("title", "") or "")
+        artist = str(meta.get("artist", "") or "")
+        album  = str(meta.get("album", "") or "")
+        if title:
+            tags["TIT2"] = TIT2(encoding=3, text=title)
+        if artist:
+            tags["TPE1"] = TPE1(encoding=3, text=artist)
+        if album:
+            tags["TALB"] = TALB(encoding=3, text=album)
+        tags.save(str(file_path))
+    except Exception as exc:
+        logging.getLogger(__name__).warning("ID3 tag write failed for %s: %s", file_path.name, exc)
+
+
 def _norm_str(s: str) -> str:
     """Lowercase + strip diacritics + collapse whitespace for fuzzy match (C-01)."""
     return re.sub(
@@ -375,18 +404,19 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
 
 
 def _search_yt_candidates(query: str, count: int = 5) -> list[dict]:
-    """Return top N YouTube Music results as {id, title, channel, duration} dicts."""
+    """Return top N YouTube search results as {id, title, channel, duration} dicts.
+
+    Uses ytsearch: (regular YouTube) for broad version/remix coverage.
+    """
     ytdlp = shutil.which("yt-dlp")
     if not ytdlp:
         return []
     try:
-        encoded = urllib.parse.quote_plus(query)
-        search_url = f"https://music.youtube.com/search?q={encoded}"
         import os as _os
         result = subprocess.run(
-            [ytdlp, "--playlist-end", str(count), "--no-check-certificate", "--no-warnings",
+            [ytdlp, f"ytsearch{count}:{query}", "--no-check-certificate", "--no-warnings",
              "--print", "%(id)s|||%(title)s|||%(duration)s|||%(channel)s|||%(view_count)s",
-             search_url],
+             "--no-playlist"],
             capture_output=True, text=True, timeout=30,
             encoding="utf-8", errors="replace",
             env={**_os.environ, "PYTHONUTF8": "1"},
@@ -448,8 +478,18 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
 
         # W-03: word-boundary match so short titles like "Run" don't match
         # "Running"/"Marathon Runner"/"Rerun".
-        if title_l and re.search(rf"\b{re.escape(title_l)}\b", vid_l):
+        # Split base title from version qualifier (e.g. "La Curiosidad (Grand Prix Red)")
+        _version_m   = re.search(r"\s*\(([^)]+)\)\s*$", title_l)
+        _base_title  = title_l[: _version_m.start()].strip() if _version_m else title_l
+        _version_kw  = _version_m.group(1).lower() if _version_m else None
+        if _base_title and re.search(rf"\b{re.escape(_base_title)}\b", vid_l):
             score += 5.0
+        # If Spotify track has a version qualifier (remix, edition), reward match / penalise absence
+        if _version_kw:
+            if _version_kw in vid_l:
+                score += 4.0
+            else:
+                score -= 5.0
         # Weak signal: official YT Music songs often have simple titles without artist prefix
         # W-03: same word-boundary fix for short artist keys ("Bee", "Yes", "Air").
         if artist_key and re.search(rf"\b{re.escape(artist_key)}\b", vid_l):
@@ -546,6 +586,7 @@ def _ibroadcast_login(
             timeout=15,
         )
         data = resp.json()
+        _log = logging.getLogger(__name__)
         if not data.get("result"):
             return None, None, {}, {}
         token     = data["user"]["token"]
@@ -565,6 +606,7 @@ def _ibroadcast_login(
             timeout=30,
         )
         lib_data  = lib_resp.json()
+        # supported may be a list of audio formats (not field schema) — guard both cases
         supported = lib_data.get("supported", {})
         lib_sect  = lib_data.get("library", {})
 
@@ -577,19 +619,18 @@ def _ibroadcast_login(
                 for iid, item in raw.items()
             }
 
-        track_fields    = supported.get("tracks",    {}).get("fields", [])
-        playlist_fields = supported.get("playlists", {}).get("fields", [])
-        library   = _to_dict(lib_sect.get("tracks",    {}), track_fields)
-        playlists = _to_dict(lib_sect.get("playlists", {}), playlist_fields)
+        if isinstance(supported, dict):
+            track_fields    = supported.get("tracks",    {}).get("fields", [])
+            playlist_fields = supported.get("playlists", {}).get("fields", [])
+        else:
+            track_fields    = []
+            playlist_fields = []
 
-        _log = logging.getLogger(__name__)
+        raw_tracks    = lib_sect.get("tracks",    {}) if isinstance(lib_sect, dict) else {}
+        raw_playlists = lib_sect.get("playlists", {}) if isinstance(lib_sect, dict) else {}
+        library   = _to_dict(raw_tracks,    track_fields)
+        playlists = _to_dict(raw_playlists, playlist_fields)
         _log.warning("iBroadcast library: %d tracks, %d playlists", len(library), len(playlists))
-        if library:
-            sample = next(iter(library.values()))
-            _log.warning("Track sample keys: %s", list(sample.keys()) if isinstance(sample, dict) else type(sample))
-        if playlists:
-            sample_pl = next(iter(playlists.values()))
-            _log.warning("Playlist sample: %s", sample_pl if isinstance(sample_pl, dict) else type(sample_pl))
 
         return token, user_id, library, playlists
     except Exception as exc:
@@ -598,35 +639,49 @@ def _ibroadcast_login(
 
 
 def _is_duplicate(title: str, artist: str, library: dict) -> bool:
-    """Case-insensitive title+artist exact match against fetched library (D-05)."""
-    t = title.strip().casefold()
-    a = artist.strip().casefold()
-    return any(
-        track.get("title", "").strip().casefold() == t and
-        track.get("artist", "").strip().casefold() == a
-        for track in library.values()
-    )
+    """Case-insensitive title+artist exact match against fetched library (D-05).
+
+    Handles both named-field dicts and raw positional arrays from the iBroadcast
+    library response. Positional arrays: index 2 = title, index 12 = artist.
+    Returns False (no duplicate) when the format is unrecognized.
+    """
+    t = str(title).strip().casefold()
+    a = str(artist).strip().casefold()
+    for track in library.values():
+        if isinstance(track, dict):
+            if str(track.get("title", "")).strip().casefold() == t and \
+               str(track.get("artist", "")).strip().casefold() == a:
+                return True
+        elif isinstance(track, list) and len(track) > 12:
+            if str(track[2]).strip().casefold() == t and \
+               str(track[12]).strip().casefold() == a:
+                return True
+    return False
 
 
-def _ibroadcast_upload(file_path: "Path", user_id: int, token: str) -> tuple[bool, int | None]:
+def _ibroadcast_upload(file_path: "Path", user_id: int, token: str, playlist_id: str | None = None) -> tuple[bool, int | None]:
     """Upload a single MP3 to iBroadcast. Returns (success, track_id) — track_id may be None (UPL-01)."""
     try:
+        upload_data = {
+            "user_id": user_id,
+            "token": token,
+            "file_path": file_path.name,
+            "method": "manual",
+            "client": "tunebridge",
+            "supported_types": 1,
+        }
+        if playlist_id:
+            upload_data["playlist_id"] = int(playlist_id)
         with open(file_path, "rb") as f:
             resp = requests.post(
                 "https://upload.ibroadcast.com/",
-                data={
-                    "user_id": user_id,
-                    "token": token,
-                    "file_path": file_path.name,
-                    "method": "api",
-                    "client": "tunebridge",
-                    "supported_types": 1,
-                },
+                data=upload_data,
                 files={"file": (file_path.name, f, "audio/mpeg")},
                 verify=False,
                 timeout=120,
             )
         data     = resp.json()
+        logging.getLogger(__name__).debug("iBroadcast upload response: %s", data)
         success  = resp.ok and bool(data.get("result", False))
         track_id = data.get("id") or data.get("track_id")
         return success, (int(track_id) if track_id is not None else None)
@@ -641,29 +696,27 @@ def _ibroadcast_add_to_playlist(
     current_tracks: list,
     user_id: int,
     token: str,
+    playlist_name: str = "",
 ) -> bool:
-    """Append new_track_ids to an existing iBroadcast playlist.
-
-    iBroadcast playlist mode replaces the full track list, so we merge
-    current_tracks + new_track_ids and POST the combined list.
-    """
+    """Append new_track_ids to an existing iBroadcast playlist via appendplaylist mode."""
     try:
-        merged = list(current_tracks) + [t for t in new_track_ids if t not in current_tracks]
+        _log = logging.getLogger(__name__)
+        _log.debug("Playlist add: playlist_id=%r, new_ids=%s", playlist_id, new_track_ids)
         resp = requests.post(
             "https://api.ibroadcast.com/s/JSON/",
             json={
-                "mode": "playlist",
+                "mode": "appendplaylist",
                 "user_id": user_id,
                 "token": token,
-                "client": "tunebridge",
-                "supported_types": 1,
-                "playlist_id": playlist_id,
-                "tracks": merged,
+                "playlist_id": int(playlist_id),
+                "tracks": new_track_ids,
             },
             verify=False,
             timeout=15,
         )
-        return bool(resp.json().get("result", False))
+        data = resp.json()
+        _log.debug("appendplaylist response: result=%s", data.get('result'))
+        return bool(data.get("result", False))
     except Exception as exc:
         logging.getLogger(__name__).warning("Playlist update failed: %s", exc)
         return False
@@ -680,6 +733,8 @@ class _Dispatcher(QObject):
     folder_requested   = Signal(int)           # D-02: worker emits row_id; main thread shows dialog
     folder_batch_done  = Signal()              # D-11: emitted when all folder dialogs resolve
     upload_batch_done  = Signal()              # Phase 6: emitted when all upload workers resolve
+    status_message     = Signal(str)           # thread-safe status bar update
+    start_playlist_poll = Signal()             # triggers QTimer on main thread from worker
 
     def __init__(self, table: "BatchTable"):
         super().__init__()
@@ -1217,7 +1272,12 @@ class PlaylistSelectDialog(QDialog):
         self._list.addItem(none_item)
 
         for pid, pdata in playlists.items():
-            raw_name = pdata.get("name", f"Playlist {pid}") if isinstance(pdata, dict) else pid
+            if isinstance(pdata, dict):
+                raw_name = pdata.get("name", f"Playlist {pid}")
+            elif isinstance(pdata, list) and pdata:
+                raw_name = pdata[0]
+            else:
+                raw_name = f"Playlist {pid}"
             item = QListWidgetItem(str(raw_name))
             item.setData(Qt.ItemDataRole.UserRole, str(pid))
             self._list.addItem(item)
@@ -1447,7 +1507,9 @@ class TuneBridgeApp(QMainWindow):
         self._upload_existed  = 0
         self._upload_failed   = 0
         # Phase 6: playlist state (set in _start_upload_batch, used in _on_upload_row_finished)
-        self._upload_playlist_id:  str | None  = None
+        self._upload_playlist_id:   str | None  = None
+        self._upload_playlist_name: str        = ""
+        self._playlist_pending:     bool       = False
         self._upload_token:        str | None  = None
         self._upload_user_id:      int | None  = None
         self._upload_playlists:    dict        = {}
@@ -1465,6 +1527,8 @@ class TuneBridgeApp(QMainWindow):
             Qt.ConnectionType.QueuedConnection,
         )
         self._dispatcher.folder_batch_done.connect(self._start_upload_batch)
+        self._dispatcher.status_message.connect(self.statusBar().showMessage)
+        self._dispatcher.start_playlist_poll.connect(self._on_start_playlist_poll)
         self._dispatcher.upload_batch_done.connect(self._unlock_ui)
 
         # Metadata clients — no credentials required
@@ -1709,12 +1773,26 @@ class TuneBridgeApp(QMainWindow):
                 # file until the new file is successfully placed. shutil.move
                 # copies to a .tmp sidecar; os.replace then performs the rename
                 # atomically (or raises, leaving the user's original intact).
-                dest_candidate = Path(result) / Path(temp).name
+                #
+                # Build clean filename from metadata (strip tb_xxxx_ temp prefix).
+                meta       = self._row_metadata.get(row_id, {})
+                _raw_artist = str(meta.get("artist", "") or "")
+                _artist    = _sanitise_filename(_raw_artist.split(",")[0].strip())
+                _track     = _sanitise_filename(str(meta.get("track_title", "") or meta.get("title", "") or ""))
+                _suffix    = "_432hz" if "_432hz" in Path(temp).name else ""
+                if _artist and _track:
+                    _clean = f"{_artist} - {_track}{_suffix}.mp3"
+                else:
+                    # fallback: strip tb_xxxxxxxx_ prefix only
+                    _clean = re.sub(r"^tb_[0-9a-f]{8}_", "", Path(temp).name)
+                dest_candidate = Path(result) / _clean
                 tmp_dest = dest_candidate.with_suffix(dest_candidate.suffix + ".tmp")
                 if tmp_dest.exists():
                     tmp_dest.unlink(missing_ok=True)
                 shutil.move(str(temp), str(tmp_dest))
                 os.replace(str(tmp_dest), str(dest_candidate))
+                # Write ID3 tags so iBroadcast shows correct title/artist/album
+                _write_id3_tags(dest_candidate, meta)
                 final = dest_candidate
                 self._saved_paths[row_id] = final
                 if not self._closing.is_set():
@@ -1804,11 +1882,22 @@ class TuneBridgeApp(QMainWindow):
                 playlist_id = dlg.selected_id()
 
         # Store playlist state for workers and _on_upload_row_finished
-        self._upload_playlist_id = playlist_id
-        self._upload_token       = token
-        self._upload_user_id     = user_id
-        self._upload_playlists   = playlists
-        self._upload_track_ids   = []
+        self._upload_playlist_id      = playlist_id
+        self._upload_token            = token
+        self._upload_user_id          = user_id
+        self._upload_playlists        = playlists
+        self._upload_track_ids        = []
+        # Snapshot of library track IDs before upload — used to detect new tracks after processing
+        self._pre_upload_library_ids  = set(library.keys())
+        # Store playlist name for status messages
+        if playlist_id:
+            pdata = playlists.get(playlist_id, {})
+            if isinstance(pdata, list):
+                self._upload_playlist_name = str(pdata[0]) if pdata else playlist_id
+            else:
+                self._upload_playlist_name = str(pdata.get("name", playlist_id)) if isinstance(pdata, dict) else playlist_id
+        else:
+            self._upload_playlist_name = ""
 
         # D-10: submit parallel upload workers (one per saved row)
         self._upload_total = len(uploading_rows)
@@ -1839,7 +1928,7 @@ class TuneBridgeApp(QMainWindow):
                 self._on_upload_row_finished(row_id, SongStatus.ALREADY_UPLOADED.value)
                 return
 
-            success, track_id = _ibroadcast_upload(file_path, user_id, token)
+            success, track_id = _ibroadcast_upload(file_path, user_id, token, self._upload_playlist_id)
             if success and track_id and self._upload_playlist_id:
                 with self._upload_track_ids_lock:
                     self._upload_track_ids.append(track_id)
@@ -1887,29 +1976,103 @@ class TuneBridgeApp(QMainWindow):
         # All upload rows resolved (D-11, D-12)
         self._dispatcher.upload_batch_done.emit()
 
-        # Add successfully uploaded tracks to selected playlist (single API call for the batch)
-        playlist_msg = ""
-        if self._upload_playlist_id and self._upload_track_ids:
-            current = (self._upload_playlists
-                       .get(self._upload_playlist_id, {})
-                       .get("tracks", []))
-            ok = _ibroadcast_add_to_playlist(
-                self._upload_playlist_id,
-                self._upload_track_ids,
-                current,
-                self._upload_user_id,
-                self._upload_token,
-            )
-            playlist_name = str((self._upload_playlists
-                                 .get(self._upload_playlist_id, {})
-                                 .get("name", "playlist")))
-            playlist_msg = f" → added to '{playlist_name}'" if ok else " (playlist update failed)"
-
-        self.statusBar().showMessage(
+        base_msg = (
             f"Done — {self._upload_done} uploaded, "
             f"{self._upload_existed} already existed, "
             f"{self._upload_failed} failed"
-            f"{playlist_msg}"
+        )
+
+        if self._upload_playlist_id and self._upload_done > 0:
+            pdata = self._upload_playlists.get(self._upload_playlist_id, {})
+            if isinstance(pdata, list):
+                playlist_name = str(pdata[0]) if pdata else "playlist"
+            else:
+                playlist_name = str(pdata.get("name", "playlist")) if isinstance(pdata, dict) else "playlist"
+            self.statusBar().showMessage(
+                f"{base_msg} — waiting for iBroadcast to process, then adding to '{playlist_name}'…"
+            )
+            # iBroadcast upload API returns no track_id — tracks appear after async processing.
+            # Schedule a library re-fetch after 30s to find new track IDs and add them to playlist.
+            self._playlist_pending = True
+            self._dispatcher.start_playlist_poll.emit()
+        else:
+            self.statusBar().showMessage(base_msg)
+
+    def _on_start_playlist_poll(self) -> None:
+        """Main-thread slot: start QTimer for delayed playlist update (safe from main thread)."""
+        QTimer.singleShot(5_000, lambda: self._delayed_playlist_update(
+            self._upload_playlist_id,
+            self._upload_playlist_name,
+            set(self._pre_upload_library_ids),
+            self._upload_user_id,
+            self._upload_token,
+        ))
+
+    def _delayed_playlist_update(
+        self,
+        playlist_id: str,
+        playlist_name: str,
+        pre_ids: set,
+        user_id: int,
+        token: str,
+        attempt: int = 1,
+    ) -> None:
+        """Main-thread slot (QTimer): dispatch playlist polling to background thread."""
+        self._executor.submit(
+            self._playlist_update_worker,
+            playlist_id, playlist_name, pre_ids, user_id, token, 1,
+        )
+
+    def _playlist_update_worker(
+        self,
+        playlist_id: str,
+        playlist_name: str,
+        pre_ids: set,
+        user_id: int,
+        token: str,
+        attempt: int,
+    ) -> None:
+        """Background worker: poll library until new tracks appear, then add to playlist.
+
+        Retries up to 3 times with 60s sleep between attempts.
+        All network calls stay in this thread — no QTimer from worker thread.
+        """
+        import time
+        username = os.environ.get("IBROADCAST_USERNAME", "").strip()
+        password = os.environ.get("IBROADCAST_PASSWORD", "").strip()
+        for attempt in range(1, 4):
+            new_token, new_user_id, new_library, new_playlists = _ibroadcast_login(username, password)
+            new_ids = [int(k) for k in new_library if k not in pre_ids]
+            if new_ids:
+                break
+            if attempt < 3:
+                self._dispatcher.status_message.emit(
+                    f"Waiting for iBroadcast to process… (check {attempt}/3, retry in 60s)"
+                )
+                time.sleep(60)
+            else:
+                self._playlist_pending = False
+                self._dispatcher.status_message.emit(
+                    f"Could not add to '{playlist_name}' — iBroadcast still processing. Add manually."
+                )
+                return
+        pdata = new_playlists.get(playlist_id, {})
+        if isinstance(pdata, list):
+            current = pdata[1] if len(pdata) > 1 and isinstance(pdata[1], list) else []
+        else:
+            current = pdata.get("tracks", []) if isinstance(pdata, dict) else []
+        ok = _ibroadcast_add_to_playlist(playlist_id, new_ids, current, new_user_id or user_id, new_token or token, playlist_name)
+        self._playlist_pending = False
+        if ok:
+            self._dispatcher.status_message.emit(
+                f"Added {len(new_ids)} track(s) to playlist '{playlist_name}'."
+            )
+        else:
+            self._dispatcher.status_message.emit(
+                f"Playlist add failed for '{playlist_name}'."
+            )
+        logging.getLogger(__name__).debug(
+            "Playlist update: new_ids=%s, ok=%s", new_ids, ok
         )
 
     def _on_download_row_finished(self, _row_id: int, status: str) -> None:
@@ -2053,6 +2216,17 @@ class TuneBridgeApp(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Shutdown thread pool and clean up leftover temp files on window close (D-04, D-12)."""
+        if self._playlist_pending:
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self, "Playlist update in progress",
+                "Tracks are being added to the playlist. Close anyway and skip playlist update?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
         self._closing.set()
         # Unblock any _folder_worker waiting on a dialog — None sentinel already in _folder_results (D-04)
         for ev in list(self._folder_events.values()):
