@@ -495,6 +495,8 @@ class SongStatus(Enum):
     FAILED_DOWNLOAD = "Failed — download"   # D-13: per-row download failure status
     SKIPPED         = "Skipped — folder"    # D-05: user chose skip in FolderConfirmDialog
     FAILED_SAVE     = "Failed — save"       # D-10: OSError during shutil.move
+    ALREADY_UPLOADED = "Already uploaded"   # D-07: duplicate on iBroadcast
+    FAILED_UPLOAD    = "Failed — upload"    # D-14: upload HTTP/network failure
 
 
 # ---------------------------------------------------------------------------
@@ -518,6 +520,75 @@ def classify_url(url: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# iBroadcast API helpers (Phase 6) — module level, pure functions, no Qt
+# ---------------------------------------------------------------------------
+
+def _ibroadcast_login(
+    username: str, password: str
+) -> tuple[str | None, int | None, dict]:
+    """Authenticate; return (token, user_id, library_tracks) or (None, None, {})."""
+    try:
+        resp = requests.post(
+            "https://api.ibroadcast.com/s/JSON/",
+            json={
+                "mode": "status",
+                "email_address": username,
+                "password": password,
+                "version": "0.0",
+                "client": "tunebridge",
+                "supported_types": 1,
+            },
+            verify=False,
+            timeout=15,
+        )
+        data = resp.json()
+        if not data.get("result"):
+            return None, None, {}
+        token   = data["user"]["token"]
+        user_id = data["user"]["id"]
+        library = data.get("library", {}).get("tracks", {})
+        return token, user_id, library
+    except Exception as exc:
+        logging.getLogger(__name__).warning("iBroadcast login failed: %s", exc)
+        return None, None, {}
+
+
+def _is_duplicate(title: str, artist: str, library: dict) -> bool:
+    """Case-insensitive title+artist exact match against fetched library (D-05)."""
+    t = title.strip().casefold()
+    a = artist.strip().casefold()
+    return any(
+        track.get("title", "").strip().casefold() == t and
+        track.get("artist", "").strip().casefold() == a
+        for track in library.values()
+    )
+
+
+def _ibroadcast_upload(file_path: "Path", user_id: int, token: str) -> bool:
+    """Upload a single MP3 to iBroadcast. Returns True on success (UPL-01)."""
+    try:
+        with open(file_path, "rb") as f:
+            resp = requests.post(
+                "https://upload.ibroadcast.com/",
+                data={
+                    "user_id": user_id,
+                    "token": token,
+                    "file_path": file_path.name,
+                    "method": "api",
+                    "client": "tunebridge",
+                    "supported_types": 1,
+                },
+                files={"file": (file_path.name, f, "audio/mpeg")},
+                verify=False,
+                timeout=120,
+            )
+        return resp.ok and bool(resp.json().get("result", False))
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Upload failed %s: %s", file_path.name, exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Thread-safe dispatcher (replaces Phase 1 queue+after pattern)
 # ---------------------------------------------------------------------------
 
@@ -527,6 +598,7 @@ class _Dispatcher(QObject):
     metadata_ready     = Signal(int, object)   # (row_id, metadata_dict) — crosses thread boundary
     folder_requested   = Signal(int)           # D-02: worker emits row_id; main thread shows dialog
     folder_batch_done  = Signal()              # D-11: emitted when all folder dialogs resolve
+    upload_batch_done  = Signal()              # Phase 6: emitted when all upload workers resolve
 
     def __init__(self, table: "BatchTable"):
         super().__init__()
@@ -819,6 +891,8 @@ class BatchTable(QWidget):
         "Failed — download": QColor("#EF4444"),   # D-13
         "Skipped — folder":  QColor("#B3B3B3"),   # D-05: gray, distinct from failure red
         "Failed — save":     QColor("#EF4444"),   # D-10: matches other failure states
+        "Already uploaded":  QColor("#14B8A6"),   # D-07: muted teal, distinct from Done green
+        "Failed — upload":   QColor("#EF4444"),   # D-14: same red as other failures
     }
 
     _TYPE_COLORS: dict[str, QColor] = {
@@ -1239,6 +1313,12 @@ class TuneBridgeApp(QMainWindow):
         self._folder_skipped = 0
         self._folder_failed  = 0
 
+        # Phase 6: upload batch tracking (D-04, D-11, D-12)
+        self._upload_total   = 0
+        self._upload_done    = 0
+        self._upload_existed = 0
+        self._upload_failed  = 0
+
         # Store Phase 3 metadata for Phase 4 download worker (_row_metadata gap fix)
         self._dispatcher.metadata_ready.connect(
             lambda row_id, meta: self._row_metadata.__setitem__(row_id, meta)
@@ -1249,13 +1329,21 @@ class TuneBridgeApp(QMainWindow):
             self._show_folder_dialog,
             Qt.ConnectionType.QueuedConnection,
         )
-        self._dispatcher.folder_batch_done.connect(self._unlock_ui)
+        self._dispatcher.folder_batch_done.connect(self._start_upload_batch)
+        self._dispatcher.upload_batch_done.connect(self._unlock_ui)
 
         # Metadata clients — no credentials required
         self._itunes_client = ItunesClient()
         self._yt_extractor  = YoutubeExtractor()
 
-        self.statusBar().showMessage("Ready — add songs to begin")
+        cred_ok = bool(
+            os.environ.get("IBROADCAST_USERNAME") and
+            os.environ.get("IBROADCAST_PASSWORD")
+        )
+        self.statusBar().showMessage(
+            "Ready — add songs to begin" if cred_ok
+            else "iBroadcast credentials not configured — upload will be skipped"
+        )
 
     def _process_urls(self, raw: str) -> None:
         lines = [line.strip() for line in raw.splitlines()]
@@ -1534,6 +1622,119 @@ class TuneBridgeApp(QMainWindow):
         self.statusBar().showMessage(
             f"Saved {self._folder_done}, skipped {self._folder_skipped}, "
             f"failed {self._folder_failed}"
+        )
+
+    def _start_upload_batch(self) -> None:
+        """Slot connected to folder_batch_done. Authenticates once, submits upload workers. (D-04/D-09/D-13)
+
+        Guard order:
+        1. Empty _saved_paths → unlock immediately (D-13)
+        2. Missing credentials → emit Done for all rows, unlock (D-02)
+        3. Auth failure → emit FAILED_UPLOAD for all rows, unlock (D-03)
+        4. Normal path → set _upload_total, submit _upload_worker per row (D-10)
+        """
+        uploading_rows = list(self._saved_paths.keys())
+
+        # D-13: empty batch guard — all rows were skipped or failed before saving
+        if not uploading_rows:
+            self._unlock_ui()
+            return
+
+        # D-02: missing credentials — no-op upload, treat rows as Done
+        username = os.environ.get("IBROADCAST_USERNAME", "").strip()
+        password = os.environ.get("IBROADCAST_PASSWORD", "").strip()
+        if not username or not password:
+            for row_id in uploading_rows:
+                self._dispatcher.row_status_changed.emit(row_id, SongStatus.DONE.value)
+            self._unlock_ui()
+            return
+
+        # D-04: authenticate once per batch
+        token, user_id, library = _ibroadcast_login(username, password)
+        if token is None:
+            # D-03: auth failure — mark all rows as failed
+            for row_id in uploading_rows:
+                self._dispatcher.row_status_changed.emit(row_id, SongStatus.FAILED_UPLOAD.value)
+            self._unlock_ui()
+            return
+
+        # D-10: submit parallel upload workers (one per saved row)
+        self._upload_total = len(uploading_rows)
+        self._upload_done = 0
+        self._upload_existed = 0
+        self._upload_failed = 0
+        for row_id in uploading_rows:
+            self._executor.submit(self._upload_worker, row_id, token, user_id, library)
+
+    def _upload_worker(self, row_id: int, token: str, user_id: int, library: dict) -> None:
+        """Worker thread: duplicate check then upload. Per-row isolated (D-16).
+
+        Arguments are passed by _start_upload_batch — no auth call inside worker (D-04).
+        All status transitions via row_status_changed signal (thread-safe Qt queued path).
+        """
+        if self._closing.is_set():
+            return
+        try:
+            meta      = self._row_metadata.get(row_id, {})
+            title     = meta.get("title", "")
+            artist    = meta.get("artist", "")
+            file_path = self._saved_paths[row_id]
+
+            if _is_duplicate(title, artist, library):
+                self._dispatcher.row_status_changed.emit(
+                    row_id, SongStatus.ALREADY_UPLOADED.value
+                )
+                self._on_upload_row_finished(row_id, SongStatus.ALREADY_UPLOADED.value)
+                return
+
+            success = _ibroadcast_upload(file_path, user_id, token)
+            status  = SongStatus.DONE if success else SongStatus.FAILED_UPLOAD
+            self._dispatcher.row_status_changed.emit(row_id, status.value)
+            self._on_upload_row_finished(row_id, status.value)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Upload worker failed row %d: %s", row_id, exc)
+            if not self._closing.is_set():
+                self._dispatcher.row_status_changed.emit(
+                    row_id, SongStatus.FAILED_UPLOAD.value
+                )
+            self._on_upload_row_finished(row_id, SongStatus.FAILED_UPLOAD.value)
+
+    def _on_upload_row_finished(self, _row_id: int, status: str) -> None:
+        """Track upload batch completion. Called from _upload_worker threads.
+
+        _upload_total is written once before any worker starts → safe read.
+        Counter increments (_upload_done/_existed/_failed) are mutually exclusive
+        and protected by CPython GIL for v1.0 (max 4 threads). (D-11/D-12)
+        When all rows resolve: emit upload_batch_done, update status bar.
+        """
+        terminal = (
+            SongStatus.DONE.value,
+            SongStatus.ALREADY_UPLOADED.value,
+            SongStatus.FAILED_UPLOAD.value,
+        )
+        if status not in terminal:
+            return
+
+        if status == SongStatus.DONE.value:
+            self._upload_done += 1
+        elif status == SongStatus.ALREADY_UPLOADED.value:
+            self._upload_existed += 1
+        else:
+            self._upload_failed += 1
+
+        finished = self._upload_done + self._upload_existed + self._upload_failed
+        if finished < self._upload_total:
+            self.statusBar().showMessage(
+                f"Uploading {finished} of {self._upload_total}…"
+            )
+            return
+
+        # All upload rows resolved (D-11, D-12)
+        self._dispatcher.upload_batch_done.emit()
+        self.statusBar().showMessage(
+            f"Done — {self._upload_done} uploaded, "
+            f"{self._upload_existed} already existed, "
+            f"{self._upload_failed} failed"
         )
 
     def _on_download_row_finished(self, _row_id: int, status: str) -> None:
