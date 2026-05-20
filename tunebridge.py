@@ -457,10 +457,13 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
     target_s   = duration_ms / 1000.0 if duration_ms else None
     # More candidates when no duration data — increases chance of finding audio version
     candidate_count = 5 if target_s else 8
+    _log = logging.getLogger(__name__)
+    _log.warning("YT search: query=%r target_s=%s count=%d", query, target_s, candidate_count)
     candidates = _search_yt_candidates(query, count=candidate_count)
     if not candidates:
         return None
     title_l    = title.lower()
+    title_n    = _norm_str(title)   # accent-stripped for YT title matching
     artist_key = artist.split(",")[0].strip().lower()
 
     scored = []
@@ -486,21 +489,22 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
         # "Running"/"Marathon Runner"/"Rerun".
         # Split base title from version qualifier (e.g. "La Curiosidad (Grand Prix Red)")
         _version_m   = re.search(r"\s*\(([^)]+)\)\s*$", title_l)
-        _base_title  = title_l[: _version_m.start()].strip() if _version_m else title_l
-        _version_kw  = _version_m.group(1).lower() if _version_m else None
-        if _base_title and re.search(rf"\b{re.escape(_base_title)}\b", vid_l):
+        _base_title  = title_n[: _version_m.start()].strip() if _version_m else title_n
+        _version_kw  = _norm_str(_version_m.group(1)) if _version_m else None
+        vid_n        = _norm_str(c.get("title", ""))   # accent-stripped YT title
+        if _base_title and re.search(rf"\b{re.escape(_base_title)}\b", vid_n):
             score += 5.0
         # If Spotify track has a version qualifier (remix, edition), reward match / penalise absence
         if _version_kw:
-            if _version_kw in vid_l:
+            if _version_kw in vid_n:
                 score += 4.0
             else:
                 score -= 5.0
         # Weak signal: official YT Music songs often have simple titles without artist prefix
         # W-03: same word-boundary fix for short artist keys ("Bee", "Yes", "Air").
-        if artist_key and re.search(rf"\b{re.escape(artist_key)}\b", vid_l):
+        if artist_key and re.search(rf"\b{re.escape(artist_key)}\b", vid_n):
             score += 1.0
-        if artist_key and artist_key in c.get("channel", "").lower():
+        if artist_key and _norm_str(artist_key) in _norm_str(c.get("channel", "")):
             score += 3.0
         # View count: tiebreaker, capped lower when no duration to stop viral
         # music videos from dominating audio-only uploads.
@@ -537,6 +541,10 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
 
     scored.sort(key=lambda x: -x[0])
     best_score, best = scored[0]
+
+    for s, c in scored[:4]:
+        _log.warning("  cand score=%.1f dur=%ds | %s", s, c.get("duration",0), c.get("title","")[:55])
+    _log.warning("  => selected score=%.1f dur=%ds | %s", best_score, best.get("duration",0), best.get("title","")[:55])
 
     if best_score <= 0:
         return None
