@@ -372,7 +372,7 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
             except Exception:
                 pass
 
-        timer = threading.Timer(600, _kill)
+        timer = threading.Timer(90, _kill)
         timer.start()
         try:
             proc.stdout.read()
@@ -1385,7 +1385,7 @@ class FolderConfirmDialog(QDialog):
 
 
 class TuneBridgeApp(QMainWindow):
-    _MAX_WORKERS = 4
+    _MAX_WORKERS = 6
 
     def __init__(self):
         super().__init__()
