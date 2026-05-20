@@ -454,11 +454,12 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
     artist match (3pts). Returns a YouTube Music URL, or None if nothing matched.
     """
     query = f"{artist} {title}" if artist else title
-    candidates = _search_yt_candidates(query, count=5)
+    target_s   = duration_ms / 1000.0 if duration_ms else None
+    # More candidates when no duration data — increases chance of finding audio version
+    candidate_count = 5 if target_s else 8
+    candidates = _search_yt_candidates(query, count=candidate_count)
     if not candidates:
         return None
-
-    target_s   = duration_ms / 1000.0 if duration_ms else None
     title_l    = title.lower()
     artist_key = artist.split(",")[0].strip().lower()
 
@@ -506,13 +507,24 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
         views = c.get("view_count", 0) or 0
         if views > 0:
             score += min(math.log10(views), 5.0)
-        # Penalise non-original versions
+        # Penalise non-original versions and music videos (which have intros/outros)
         if any(kw in vid_l for kw in (
             "letra", "lyrics", "lyric video", "karaoke",
             "bass boosted", "sped up", "slowed", "nightcore",
             "8d audio", "reverb", "pitched",
         )):
             score -= 3.0
+        # Music videos typically have visual intros/outros making them longer than the song
+        if any(kw in vid_l for kw in (
+            "official video", "video oficial", "official music video",
+            "videoclip", "video clip", "official mv", "(mv)",
+        )):
+            score -= 3.0
+        # Prefer audio-only uploads when duration data is unavailable
+        if target_s is None and any(kw in vid_l for kw in (
+            "official audio", "audio oficial", "audio only", "full song",
+        )):
+            score += 3.0
 
         scored.append((score, c))
 
