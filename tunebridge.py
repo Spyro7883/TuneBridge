@@ -36,11 +36,14 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPushButton,
     QSizePolicy,
@@ -526,8 +529,8 @@ def classify_url(url: str) -> str | None:
 
 def _ibroadcast_login(
     username: str, password: str
-) -> tuple[str | None, int | None, dict]:
-    """Authenticate; return (token, user_id, library_tracks) or (None, None, {})."""
+) -> tuple[str | None, int | None, dict, dict]:
+    """Authenticate; return (token, user_id, library_tracks, playlists) or (None, None, {}, {})."""
     try:
         resp = requests.post(
             "https://api.ibroadcast.com/s/JSON/",
@@ -544,14 +547,16 @@ def _ibroadcast_login(
         )
         data = resp.json()
         if not data.get("result"):
-            return None, None, {}
-        token   = data["user"]["token"]
-        user_id = data["user"]["id"]
-        library = data.get("library", {}).get("tracks", {})
-        return token, user_id, library
+            return None, None, {}, {}
+        token     = data["user"]["token"]
+        user_id   = data["user"]["id"]
+        lib       = data.get("library", {})
+        library   = lib.get("tracks", {})
+        playlists = lib.get("playlists", {})
+        return token, user_id, library, playlists
     except Exception as exc:
         logging.getLogger(__name__).warning("iBroadcast login failed: %s", exc)
-        return None, None, {}
+        return None, None, {}, {}
 
 
 def _is_duplicate(title: str, artist: str, library: dict) -> bool:
@@ -565,8 +570,8 @@ def _is_duplicate(title: str, artist: str, library: dict) -> bool:
     )
 
 
-def _ibroadcast_upload(file_path: "Path", user_id: int, token: str) -> bool:
-    """Upload a single MP3 to iBroadcast. Returns True on success (UPL-01)."""
+def _ibroadcast_upload(file_path: "Path", user_id: int, token: str) -> tuple[bool, int | None]:
+    """Upload a single MP3 to iBroadcast. Returns (success, track_id) — track_id may be None (UPL-01)."""
     try:
         with open(file_path, "rb") as f:
             resp = requests.post(
@@ -583,9 +588,46 @@ def _ibroadcast_upload(file_path: "Path", user_id: int, token: str) -> bool:
                 verify=False,
                 timeout=120,
             )
-        return resp.ok and bool(resp.json().get("result", False))
+        data     = resp.json()
+        success  = resp.ok and bool(data.get("result", False))
+        track_id = data.get("id") or data.get("track_id")
+        return success, (int(track_id) if track_id is not None else None)
     except Exception as exc:
         logging.getLogger(__name__).warning("Upload failed %s: %s", file_path.name, exc)
+        return False, None
+
+
+def _ibroadcast_add_to_playlist(
+    playlist_id: str,
+    new_track_ids: list[int],
+    current_tracks: list,
+    user_id: int,
+    token: str,
+) -> bool:
+    """Append new_track_ids to an existing iBroadcast playlist.
+
+    iBroadcast playlist mode replaces the full track list, so we merge
+    current_tracks + new_track_ids and POST the combined list.
+    """
+    try:
+        merged = list(current_tracks) + [t for t in new_track_ids if t not in current_tracks]
+        resp = requests.post(
+            "https://api.ibroadcast.com/s/JSON/",
+            json={
+                "mode": "playlist",
+                "user_id": user_id,
+                "token": token,
+                "client": "tunebridge",
+                "supported_types": 1,
+                "playlist_id": playlist_id,
+                "tracks": merged,
+            },
+            verify=False,
+            timeout=15,
+        )
+        return bool(resp.json().get("result", False))
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Playlist update failed: %s", exc)
         return False
 
 
@@ -1113,6 +1155,53 @@ class PasteTextEdit(QTextEdit):
 # ---------------------------------------------------------------------------
 
 
+class PlaylistSelectDialog(QDialog):
+    """Modal dialog: pick an iBroadcast playlist for the current upload batch.
+
+    Shown once per batch in _start_upload_batch (main thread only).
+    Returns selected playlist_id via selected_id(), or None if 'No playlist' chosen.
+    """
+
+    _NO_PLAYLIST = "__none__"
+
+    def __init__(self, playlists: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add to playlist")
+        self.setModal(True)
+        self.setMinimumWidth(320)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Choose an iBroadcast playlist for these tracks:"))
+
+        self._list = QListWidget()
+        none_item = QListWidgetItem("— No playlist (upload to library only)")
+        none_item.setData(Qt.ItemDataRole.UserRole, self._NO_PLAYLIST)
+        self._list.addItem(none_item)
+
+        for pid, pdata in playlists.items():
+            name = pdata.get("name", f"Playlist {pid}") if isinstance(pdata, dict) else str(pdata)
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole, str(pid))
+            self._list.addItem(item)
+
+        self._list.setCurrentRow(0)
+        layout.addWidget(self._list)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def selected_id(self) -> str | None:
+        item = self._list.currentItem()
+        if item is None:
+            return None
+        val = item.data(Qt.ItemDataRole.UserRole)
+        return None if val == self._NO_PLAYLIST else val
+
+
 class FolderConfirmDialog(QDialog):
     """Modal dialog: user confirms or skips destination folder for one song. (D-15/D-16/D-17)
 
@@ -1315,10 +1404,17 @@ class TuneBridgeApp(QMainWindow):
         self._folder_failed  = 0
 
         # Phase 6: upload batch tracking (D-04, D-11, D-12)
-        self._upload_total   = 0
-        self._upload_done    = 0
-        self._upload_existed = 0
-        self._upload_failed  = 0
+        self._upload_total    = 0
+        self._upload_done     = 0
+        self._upload_existed  = 0
+        self._upload_failed   = 0
+        # Phase 6: playlist state (set in _start_upload_batch, used in _on_upload_row_finished)
+        self._upload_playlist_id:  str | None  = None
+        self._upload_token:        str | None  = None
+        self._upload_user_id:      int | None  = None
+        self._upload_playlists:    dict        = {}
+        self._upload_track_ids:    list[int]   = []
+        self._upload_track_ids_lock = threading.Lock()
 
         # Store Phase 3 metadata for Phase 4 download worker (_row_metadata gap fix)
         self._dispatcher.metadata_ready.connect(
@@ -1654,13 +1750,27 @@ class TuneBridgeApp(QMainWindow):
             return
 
         # D-04: authenticate once per batch
-        token, user_id, library = _ibroadcast_login(username, password)
+        token, user_id, library, playlists = _ibroadcast_login(username, password)
         if token is None:
             # D-03: auth failure — mark all rows as failed
             for row_id in uploading_rows:
                 self._dispatcher.row_status_changed.emit(row_id, SongStatus.FAILED_UPLOAD.value)
             self._unlock_ui()
             return
+
+        # Ask user which playlist to upload to (main thread — safe to show dialog here)
+        playlist_id = None
+        if playlists:
+            dlg = PlaylistSelectDialog(playlists, parent=self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                playlist_id = dlg.selected_id()
+
+        # Store playlist state for workers and _on_upload_row_finished
+        self._upload_playlist_id = playlist_id
+        self._upload_token       = token
+        self._upload_user_id     = user_id
+        self._upload_playlists   = playlists
+        self._upload_track_ids   = []
 
         # D-10: submit parallel upload workers (one per saved row)
         self._upload_total = len(uploading_rows)
@@ -1691,8 +1801,11 @@ class TuneBridgeApp(QMainWindow):
                 self._on_upload_row_finished(row_id, SongStatus.ALREADY_UPLOADED.value)
                 return
 
-            success = _ibroadcast_upload(file_path, user_id, token)
-            status  = SongStatus.DONE if success else SongStatus.FAILED_UPLOAD
+            success, track_id = _ibroadcast_upload(file_path, user_id, token)
+            if success and track_id and self._upload_playlist_id:
+                with self._upload_track_ids_lock:
+                    self._upload_track_ids.append(track_id)
+            status = SongStatus.DONE if success else SongStatus.FAILED_UPLOAD
             self._dispatcher.row_status_changed.emit(row_id, status.value)
             self._on_upload_row_finished(row_id, status.value)
         except Exception as exc:
@@ -1735,10 +1848,30 @@ class TuneBridgeApp(QMainWindow):
 
         # All upload rows resolved (D-11, D-12)
         self._dispatcher.upload_batch_done.emit()
+
+        # Add successfully uploaded tracks to selected playlist (single API call for the batch)
+        playlist_msg = ""
+        if self._upload_playlist_id and self._upload_track_ids:
+            current = (self._upload_playlists
+                       .get(self._upload_playlist_id, {})
+                       .get("tracks", []))
+            ok = _ibroadcast_add_to_playlist(
+                self._upload_playlist_id,
+                self._upload_track_ids,
+                current,
+                self._upload_user_id,
+                self._upload_token,
+            )
+            playlist_name = (self._upload_playlists
+                             .get(self._upload_playlist_id, {})
+                             .get("name", "playlist"))
+            playlist_msg = f" → added to '{playlist_name}'" if ok else " (playlist update failed)"
+
         self.statusBar().showMessage(
             f"Done — {self._upload_done} uploaded, "
             f"{self._upload_existed} already existed, "
             f"{self._upload_failed} failed"
+            f"{playlist_msg}"
         )
 
     def _on_download_row_finished(self, _row_id: int, status: str) -> None:
