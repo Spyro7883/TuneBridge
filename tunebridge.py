@@ -502,11 +502,12 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
             score += 1.0
         if artist_key and artist_key in c.get("channel", "").lower():
             score += 3.0
-        # View count: tiebreaker, not dominant signal (W-02: lowered cap so
-        # popularity cannot overwhelm content-based title/artist/duration scoring)
+        # View count: tiebreaker, capped lower when no duration to stop viral
+        # music videos from dominating audio-only uploads.
         views = c.get("view_count", 0) or 0
+        view_cap = 3.0 if target_s is None else 5.0
         if views > 0:
-            score += min(math.log10(views), 5.0)
+            score += min(math.log10(views), view_cap)
         # Penalise non-original versions and music videos (which have intros/outros)
         if any(kw in vid_l for kw in (
             "letra", "lyrics", "lyric video", "karaoke",
@@ -519,12 +520,13 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
             "official video", "video oficial", "official music video",
             "videoclip", "video clip", "official mv", "(mv)",
         )):
-            score -= 3.0
-        # Prefer audio-only uploads when duration data is unavailable
-        if target_s is None and any(kw in vid_l for kw in (
+            score -= 4.0
+        # Prefer audio-only uploads — these match the Spotify track length
+        if any(kw in vid_l for kw in (
             "official audio", "audio oficial", "audio only", "full song",
+            "(audio)", "[audio]", "| audio",
         )):
-            score += 3.0
+            score += 4.0
 
         scored.append((score, c))
 
