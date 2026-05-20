@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: complete
-last_updated: "2026-05-20T19:00:00.000Z"
-last_activity: 2026-05-20 -- Phase 06 complete — iBroadcast login, upload (method=manual), playlist (appendplaylist mode), ID3 tags, filename sanitization, 90s download timeout
+last_updated: "2026-05-21T20:00:00.000Z"
+last_activity: 2026-05-21 -- Post-release fixes: Spotify HTML duration extraction, accent normalization in YT matching, secondary 'audio' search, remix/live penalties, feat. strip, _saved_paths clear on new batch, communicate(timeout=90) for yt-dlp, playlist appendplaylist API discovered
 progress:
   total_phases: 6
   completed_phases: 6
