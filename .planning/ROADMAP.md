@@ -13,7 +13,7 @@
 - [x] **Phase 3: Metadata Services** — Spotify Web API client, yt-dlp info extraction, "(guessed)" label convention
 - [x] **Phase 4: Download Pipeline** — Dual-path download (ytsearch vs direct), 432Hz retune toggle, audio-only MP3 output
 - [x] **Phase 5: Organization** — Folder proposal logic, per-song folder confirmation dialog with threading.Event safety, skip support, file save
-- [ ] **Phase 6: iBroadcast Upload** — Auth, duplicate check, upload to iBroadcast after file save
+- [x] **Phase 6: iBroadcast Upload** — Auth, duplicate check, upload to iBroadcast after file save
 
 ---
 
@@ -130,7 +130,8 @@ Plans:
   1. App authenticates to iBroadcast using stored username/password credentials — no manual login step during batch processing
   2. Before uploading, app checks iBroadcast for the track; if it already exists, the upload is skipped and the row is marked accordingly (not as Failed)
   3. A new track is uploaded successfully and the row transitions to "Done" after upload completes
-**Plans**: TBD
+**Plans**: 3 (Plans 01-03 implemented inline + fixes)
+**Completed**: 2026-05-20
 
 ---
 
@@ -143,8 +144,8 @@ Plans:
 | 3. Metadata Services | 4/4 | Complete | 2026-05-15 |
 | 4. Download Pipeline | 4/4 | Complete | 2026-05-16 |
 | 5. Organization | 4/4 | Complete | 2026-05-17 |
-| 6. iBroadcast Upload | 0/? | Not started | - |
+| 6. iBroadcast Upload | 3/3 | Complete | 2026-05-20 |
 
 ---
 
-*Last updated: 2026-05-17 — Phase 5 complete: 76/76 tests GREEN*
+*Last updated: 2026-05-20 — v1.0 milestone complete: all 6 phases done*
