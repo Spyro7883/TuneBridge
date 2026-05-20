@@ -23,6 +23,7 @@ from enum import Enum
 from pathlib import Path
 
 import html as _html
+from dotenv import load_dotenv
 import librosa
 import numpy as np
 import requests
@@ -1912,6 +1913,7 @@ class TuneBridgeApp(QMainWindow):
 
 
 if __name__ == "__main__":
+    load_dotenv()
     app = QApplication(sys.argv)
     window = TuneBridgeApp()
     window.show()
