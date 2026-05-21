@@ -1984,7 +1984,11 @@ class TuneBridgeApp(QMainWindow):
             # Spotify URL — the primary documented input format.
             title     = meta.get("track_title", "") or meta.get("title", "")
             artist    = meta.get("artist", "")
-            file_path = self._saved_paths[row_id]
+            # WR-03: defensive read — _saved_paths can be cleared between
+            # batches; if our row was already wiped, abort this upload silently.
+            file_path = self._saved_paths.get(row_id)
+            if file_path is None:
+                return
 
             if _is_duplicate(title, artist, library):
                 self._dispatcher.row_status_changed.emit(
