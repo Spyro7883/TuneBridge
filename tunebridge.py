@@ -728,9 +728,15 @@ def _ibroadcast_upload(file_path: "Path", user_id: int, token: str, playlist_id:
                 timeout=120,
             )
         data     = resp.json()
-        logging.getLogger(__name__).debug("iBroadcast upload response: %s", data)
+        # WR-02: log only documented, non-sensitive keys. Legacy iBroadcast
+        # endpoints can echo user_id / session data in upload responses,
+        # which would land in DEBUG logs that public-release users may paste
+        # in bug reports.
         success  = resp.ok and bool(data.get("result", False))
         track_id = data.get("id") or data.get("track_id")
+        logging.getLogger(__name__).debug(
+            "iBroadcast upload: result=%s id=%s", data.get("result"), track_id
+        )
         return success, (int(track_id) if track_id is not None else None)
     except Exception as exc:
         logging.getLogger(__name__).warning("Upload failed %s: %s", file_path.name, exc)
