@@ -676,7 +676,12 @@ def _ibroadcast_login(
 
         return token, user_id, library, playlists
     except Exception as exc:
-        logging.getLogger(__name__).warning("iBroadcast login failed: %s", exc)
+        # WR-01: never log the exception object — some requests/SSL adapter
+        # stacks include the POST body (which contains the user's password)
+        # in __str__. Log only the exception type name.
+        logging.getLogger(__name__).warning(
+            "iBroadcast login failed: %s", type(exc).__name__
+        )
         return None, None, {}, {}
 
 
