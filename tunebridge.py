@@ -2085,7 +2085,7 @@ class TuneBridgeApp(QMainWindow):
         """Main-thread slot (QTimer): dispatch playlist polling to background thread."""
         self._executor.submit(
             self._playlist_update_worker,
-            playlist_id, playlist_name, pre_ids, user_id, token, 1,
+            playlist_id, playlist_name, pre_ids, user_id, token,
             self._upload_done,
         )
 
@@ -2096,7 +2096,6 @@ class TuneBridgeApp(QMainWindow):
         pre_ids: set,
         user_id: int,
         token: str,
-        attempt: int,
         expected_count: int = 1,
     ) -> None:
         """Background worker: poll library until new tracks appear, then add to playlist.
