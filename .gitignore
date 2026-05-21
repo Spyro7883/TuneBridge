@@ -9,7 +9,8 @@ build/
 *.log
 
 .superpowers/
-docs/
+docs/*
+!docs/screenshot.png
 .planning/
 
 # Scratch / temp files
