@@ -1838,8 +1838,20 @@ class TuneBridgeApp(QMainWindow):
                 tmp_dest = dest_candidate.with_suffix(dest_candidate.suffix + ".tmp")
                 if tmp_dest.exists():
                     tmp_dest.unlink(missing_ok=True)
-                shutil.move(str(temp), str(tmp_dest))
-                os.replace(str(tmp_dest), str(dest_candidate))
+                # WR-06: if shutil.move succeeds but os.replace raises
+                # (destination read-only, disk full, permission flip), the
+                # `.tmp` sidecar would otherwise stay in the user's folder
+                # forever. Clean it up on any OSError, then re-raise so the
+                # outer handler still surfaces FAILED_SAVE.
+                try:
+                    shutil.move(str(temp), str(tmp_dest))
+                    os.replace(str(tmp_dest), str(dest_candidate))
+                except OSError:
+                    try:
+                        Path(tmp_dest).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise
                 # Write ID3 tags so iBroadcast shows correct title/artist/album
                 _write_id3_tags(dest_candidate, meta)
                 final = dest_candidate
