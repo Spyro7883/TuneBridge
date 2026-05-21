@@ -2156,6 +2156,11 @@ class TuneBridgeApp(QMainWindow):
 
     def _unlock_ui(self) -> None:
         """Re-enable paste area and Hz buttons after a batch fully completes."""
+        # WR-03: bound stale-state window for _saved_paths. Late-arriving
+        # workers from a cancelled / partially-failed prior batch could
+        # otherwise read a stale entry on the next batch. _start_processing
+        # also clears at batch start; clearing here closes the gap.
+        self._saved_paths.clear()
         self._paste_box.setReadOnly(False)
         self._btn_440.setEnabled(True)
         self._btn_432.setEnabled(True)
