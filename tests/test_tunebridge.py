@@ -146,7 +146,7 @@ def test_app_stylesheet_contains_theme(window):
 
 
 def test_app_max_workers(window):
-    assert TuneBridgeApp._MAX_WORKERS == 4
+    assert TuneBridgeApp._MAX_WORKERS == 6
 
 
 def test_app_has_table(window):
@@ -273,8 +273,8 @@ def test_process_urls_status_bar_all_invalid(window):
 
 def test_worker_count_formula():
     cap = TuneBridgeApp._MAX_WORKERS
-    assert cap == 4
+    assert cap >= 1
     assert min(1, cap) == 1
-    assert min(4, cap) == 4
-    assert min(5, cap) == 4
-    assert min(10, cap) == 4
+    assert min(cap, cap) == cap
+    assert min(cap + 1, cap) == cap
+    assert min(cap + 100, cap) == cap

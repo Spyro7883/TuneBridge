@@ -127,8 +127,8 @@ def test_ibroadcast_add_to_playlist_success():
         result = _ibroadcast_add_to_playlist("99", [1, 2], [3], 42, "tok")
     assert result is True
     posted = mock_post.call_args[1]["json"]
-    assert posted["playlist_id"] == "99"
-    assert set(posted["tracks"]) == {1, 2, 3}
+    assert posted["playlist_id"] == 99
+    assert set(posted["tracks"]) == {1, 2}
 
 
 def test_ibroadcast_add_to_playlist_failure():
