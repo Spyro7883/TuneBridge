@@ -354,7 +354,13 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
         _active_procs.add(proc)
 
         def _force_kill() -> None:
-            """Kill yt-dlp + entire child process tree (C-07)."""
+            """Kill yt-dlp + entire child process tree (C-07).
+
+            WR-05: log warnings and fall back to `proc.kill()` on Windows
+            when taskkill is unavailable (e.g. stripped Server Core / Nano
+            images). The prior `except Exception: pass` silently leaked
+            zombie subprocesses into _active_procs.
+            """
             try:
                 if sys.platform == "win32":
                     subprocess.run(
@@ -364,8 +370,26 @@ def download_track_for_row(search_url: str, out_dir: Path) -> Path | None:
                     )
                 else:
                     proc.kill()
-            except Exception:
-                pass
+            except FileNotFoundError:
+                # taskkill not on PATH — fall back to direct kill (no tree walk).
+                logging.getLogger(__name__).warning(
+                    "taskkill missing; falling back to proc.kill() for PID %s", proc.pid
+                )
+                try:
+                    proc.kill()
+                except Exception as exc2:  # pragma: no cover — defensive
+                    logging.getLogger(__name__).warning(
+                        "proc.kill() fallback failed for PID %s: %s",
+                        proc.pid, type(exc2).__name__,
+                    )
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "_force_kill failed for PID %s: %s", proc.pid, type(exc).__name__
+                )
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
         try:
             proc.communicate(timeout=90)
