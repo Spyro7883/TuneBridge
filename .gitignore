@@ -10,6 +10,7 @@ build/
 
 .superpowers/
 docs/
+.planning/
 
 # Scratch / temp files
 research.txt

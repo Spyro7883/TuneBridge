@@ -76,6 +76,18 @@ The iBroadcast upload step is skipped silently if credentials are not configured
 - yt-dlp requires Node.js to solve YouTube's signature challenges; keep both up to date
 - Folders must already exist on disk; the app will not create them
 
+## Disclaimer
+
+TuneBridge is provided **for personal use only**. The user is responsible for ensuring their use of the app complies with all applicable terms of service and local laws:
+
+- **YouTube Terms of Service** restrict downloading content; use this tool only for content you have the right to download (e.g. your own uploads, Creative Commons material, or where YouTube provides a download button).
+- **Spotify** metadata is scraped from public pages — no account is required and no Spotify API credentials are used.
+- **iBroadcast** uploads are made via the official API using your own account credentials.
+
+This project is **not affiliated with, endorsed by, or sponsored by** Spotify, YouTube, Google, or iBroadcast. All trademarks are the property of their respective owners.
+
+The author accepts no responsibility for misuse. If you are unsure whether your intended use is permitted, do not use this tool.
+
 ## License
 
 MIT
