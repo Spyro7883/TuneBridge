@@ -2,13 +2,7 @@
 
 A desktop app that takes Spotify or YouTube track URLs, finds the best audio match on YouTube, downloads it, optionally retunes from 440 Hz to 432 Hz, organizes files into your existing folder structure, and uploads them to iBroadcast — all in one automated pipeline.
 
-<!-- Screenshot — replace with an actual screenshot of the running app:
-     1. Run `python tunebridge.py`
-     2. Take a screenshot showing the paste box, stat cards, and batch table
-     3. Save it as `docs/screenshot.png` (the `docs/` dir is gitignored — remove that entry first)
-     4. Uncomment the line below
--->
-<!-- ![TuneBridge UI](docs/screenshot.png) -->
+![TuneBridge UI](docs/screenshot.png)
 
 ## Features
 
