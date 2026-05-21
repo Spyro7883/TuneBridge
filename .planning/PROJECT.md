@@ -40,7 +40,7 @@ Given a batch of Spotify links, TuneBridge delivers the downloaded (and optional
 - [ ] Retune downloaded audio to 432Hz when selected
 - [ ] Propose folder destination per-song based on metadata (artist/album/single classification)
 - [ ] User confirms or adjusts folder per-song before saving (each song in batch gets its own folder dialog; last-used folder suggested as default)
-- [ ] Save to existing folder structure (e.g. BoqueronPlaylist/432hz/Artist_432Hz/Album|Singles)
+- [ ] Save to existing folder structure (e.g. MyPlaylist/432hz/Artist_432Hz/Album|Singles)
 - [ ] Upload processed files to iBroadcast via official API
 - [ ] Dynamic thread count based on number of songs in current batch
 - [ ] Desktop GUI (tkinter) consistent with retune_app.py aesthetic
@@ -56,8 +56,8 @@ Given a batch of Spotify links, TuneBridge delivers the downloaded (and optional
 ## Context
 
 - **Existing codebase**: `retune_app.py` — functional 440→432Hz desktop retune app with tkinter GUI, yt-dlp download, librosa pitch shift, threaded parallel processing. Core retune + download logic will be reused directly.
-- **Folder structure**: Already established on disk by the user (e.g. `BoqueronPlaylist/432hz/Artist_432Hz/AlbumName/` or `.../Singles/`). App must respect and navigate this structure.
-- **iBroadcast**: Personal cloud music service with official API. Auth via username/password. Target playlist: "Boquerón Playlist" (configurable).
+- **Folder structure**: Already established on disk by the user (e.g. `MyPlaylist/432hz/Artist_432Hz/AlbumName/` or `.../Singles/`). App must respect and navigate this structure.
+- **iBroadcast**: Personal cloud music service with official API. Auth via username/password. Target playlist is user-configurable.
 - **Spotify API**: Client credentials flow (no user login) — sufficient for track metadata lookup from a track URL.
 - **YouTube search strategy**: yt-dlp `ytsearch` — no API key required, searches by artist + title + "audio" to find best audio-only match.
 

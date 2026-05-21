@@ -10,3 +10,9 @@ build/
 
 .superpowers/
 docs/
+
+# Scratch / temp files
+research.txt
+mockup.txt
+nul
+*.tmp
