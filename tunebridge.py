@@ -1917,7 +1917,11 @@ class TuneBridgeApp(QMainWindow):
             return
         try:
             meta      = self._row_metadata.get(row_id, {})
-            title     = meta.get("title", "")
+            # CR-02: Spotify metadata stores the song title under "track_title"
+            # (see lines 821, 831); only YouTube uses "title" (line 863).
+            # Reading just "title" silently broke duplicate detection for every
+            # Spotify URL — the primary documented input format.
+            title     = meta.get("track_title", "") or meta.get("title", "")
             artist    = meta.get("artist", "")
             file_path = self._saved_paths[row_id]
 
