@@ -2122,7 +2122,17 @@ class TuneBridgeApp(QMainWindow):
 
         if status == SongStatus.AWAITING.value:
             self._download_done += 1
-            self._executor.submit(self._folder_worker, _row_id)   # chain into Phase 5 (D-02)
+            # WR-04: queued row_status_changed signals can land here after
+            # closeEvent has begun shutting the executor down. Guard against
+            # `RuntimeError: cannot schedule new futures after shutdown`
+            # which would otherwise crash a second batch in the same session.
+            if self._closing.is_set():
+                return
+            try:
+                self._executor.submit(self._folder_worker, _row_id)   # chain into Phase 5 (D-02)
+            except RuntimeError:
+                # Executor already shut down during close — nothing to do.
+                return
         else:
             self._download_failed += 1
             # C-05: failed download never produces a folder dialog — shrink
