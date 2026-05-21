@@ -602,6 +602,13 @@ def classify_url(url: str) -> str | None:
 # iBroadcast API helpers (Phase 6) — module level, pure functions, no Qt
 # ---------------------------------------------------------------------------
 
+# CR-01: TLS verification is on by default. Power users behind corporate
+# MITM proxies that re-sign TLS can opt out with TUNEBRIDGE_INSECURE_TLS=1.
+# A startup warning is logged when this flag is set (see __main__).
+def _ibroadcast_tls_verify() -> bool:
+    return os.environ.get("TUNEBRIDGE_INSECURE_TLS", "").strip() not in ("1", "true", "yes")
+
+
 def _ibroadcast_login(
     username: str, password: str
 ) -> tuple[str | None, int | None, dict, dict]:
@@ -617,7 +624,7 @@ def _ibroadcast_login(
                 "client": "tunebridge",
                 "supported_types": 1,
             },
-            verify=False,
+            verify=_ibroadcast_tls_verify(),
             timeout=15,
         )
         data = resp.json()
@@ -637,7 +644,7 @@ def _ibroadcast_login(
         lib_resp = requests.post(
             "https://api.ibroadcast.com/s/JSON/",
             json={**_base, "mode": "library"},
-            verify=False,
+            verify=_ibroadcast_tls_verify(),
             timeout=30,
         )
         lib_data  = lib_resp.json()
@@ -712,7 +719,7 @@ def _ibroadcast_upload(file_path: "Path", user_id: int, token: str, playlist_id:
                 "https://upload.ibroadcast.com/",
                 data=upload_data,
                 files={"file": (file_path.name, f, "audio/mpeg")},
-                verify=False,
+                verify=_ibroadcast_tls_verify(),
                 timeout=120,
             )
         data     = resp.json()
@@ -746,7 +753,7 @@ def _ibroadcast_add_to_playlist(
                 "playlist_id": int(playlist_id),
                 "tracks": new_track_ids,
             },
-            verify=False,
+            verify=_ibroadcast_tls_verify(),
             timeout=15,
         )
         data = resp.json()
@@ -2266,6 +2273,18 @@ class TuneBridgeApp(QMainWindow):
 
 if __name__ == "__main__":
     load_dotenv()
+    # CR-01: warn loudly if the user has opted out of TLS verification.
+    if not _ibroadcast_tls_verify():
+        import warnings as _warnings
+        try:
+            from urllib3.exceptions import InsecureRequestWarning as _InsecureRequestWarning
+            _warnings.simplefilter("ignore", _InsecureRequestWarning)
+        except Exception:
+            pass
+        logging.getLogger(__name__).warning(
+            "TUNEBRIDGE_INSECURE_TLS=1 set — TLS certificate verification is DISABLED. "
+            "Credentials may be exposed to on-path attackers. Unset this variable to restore security."
+        )
     app = QApplication(sys.argv)
     window = TuneBridgeApp()
     window.show()
