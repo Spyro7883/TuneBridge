@@ -778,64 +778,21 @@ class _Dispatcher(QObject):
 
 
 # ---------------------------------------------------------------------------
-# iTunes metadata client (Spotify oEmbed + iTunes Search API — no credentials)
+# Spotify metadata client (public page scraping — no credentials)
 # ---------------------------------------------------------------------------
 
 
-class ItunesClient:
+class SpotifyClient:
     """Fetch Spotify track/album metadata via Spotify's public page OG tags.
 
     No API key or credentials required. og:title gives the track/album name;
     og:description gives "Artist · Album · Type · Year" for tracks.
+    Duration is extracted from the page HTML (MM:SS span).
     """
 
     _OG_TITLE_RE = re.compile(r'<meta property="og:title" content="([^"]+)"')
     _OG_DESC_RE  = re.compile(r'<meta property="og:description" content="([^"]+)"')
     _HEADERS     = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
-    def search_duration_ms(self, artist: str, title: str) -> int | None:
-        """Query iTunes Search API for track duration in milliseconds.
-
-        Free, no auth required. Used for YouTube duration-matching to pick the
-        correct video when ytsearch returns multiple candidates.
-        Returns None on any failure — callers fall back to ytsearch1:.
-        """
-        try:
-            term = urllib.parse.quote(f"{artist} {title}")
-            # C-12: collect across ES/MX/US stores so a regional metadata oddity
-            # in one store does not mask a clean match available in another.
-            all_results: list[dict] = []
-            for store in ("&country=ES", "&country=MX", ""):
-                try:
-                    resp = requests.get(
-                        f"https://itunes.apple.com/search?term={term}&entity=song&limit=5{store}",
-                        timeout=8,
-                    )
-                    resp.raise_for_status()
-                    all_results.extend(resp.json().get("results", []))
-                except Exception:
-                    # Per-store failure should not block the other stores.
-                    continue
-            if not all_results:
-                return None
-
-            title_n = _norm_str(title)
-            # For collaboration credits like "Artist A, Artist B", also try first artist only
-            artist_variants = [_norm_str(artist)]
-            if "," in artist:
-                artist_variants.append(_norm_str(artist.split(",")[0].strip()))
-
-            for r in all_results:
-                r_artist = _norm_str(r.get("artistName", ""))
-                r_title  = _norm_str(r.get("trackName", ""))
-                artist_match = any(
-                    v in r_artist or r_artist in v for v in artist_variants
-                )
-                if artist_match and title_n in r_title:
-                    return r.get("trackTimeMillis")
-            return None
-        except Exception:
-            return None
 
     def get_metadata(self, spotify_url: str, resource_type: str) -> dict:
         """Return metadata dict for a Spotify URL (track or album)."""
@@ -865,14 +822,10 @@ class ItunesClient:
                 "album":        title,
                 "release_type": "album",
             }
-        # C-02: extract duration from Spotify page first (most reliable source);
-        # fall back to iTunes Search API for tracks not on the Spotify web page.
         duration_ms = None
         m_dur = re.search(r">(\d{1,2}):(\d{2})</span>", html)
         if m_dur:
             duration_ms = (int(m_dur.group(1)) * 60 + int(m_dur.group(2))) * 1000
-        if not duration_ms and artist and title:
-            duration_ms = self.search_duration_ms(artist, title)
         return {
             "artist":       artist,
             "track_title":  title,
@@ -934,7 +887,7 @@ _SPOTIFY_RESOURCE_RE = re.compile(
 def fetch_metadata_for_row(
     url: str,
     url_type: str,
-    itunes_client: "ItunesClient",
+    spotify_client: "SpotifyClient",
     yt_extractor: "YoutubeExtractor",
 ) -> dict:
     """Route metadata fetch to the correct service based on url_type.
@@ -946,7 +899,7 @@ def fetch_metadata_for_row(
         if not m:
             raise ValueError(f"Cannot parse Spotify resource from URL: {url!r}")
         resource_type = m.group(1)
-        metadata = itunes_client.get_metadata(url, resource_type)
+        metadata = spotify_client.get_metadata(url, resource_type)
         metadata["source"] = "Spotify"
         return metadata
     else:  # YouTube
@@ -1572,8 +1525,8 @@ class TuneBridgeApp(QMainWindow):
         self._dispatcher.upload_batch_done.connect(self._unlock_ui)
 
         # Metadata clients — no credentials required
-        self._itunes_client = ItunesClient()
-        self._yt_extractor  = YoutubeExtractor()
+        self._spotify_client = SpotifyClient()
+        self._yt_extractor   = YoutubeExtractor()
 
         cred_ok = bool(
             os.environ.get("IBROADCAST_USERNAME") and
@@ -1641,7 +1594,7 @@ class TuneBridgeApp(QMainWindow):
             metadata = fetch_metadata_for_row(
                 url            = url,
                 url_type       = url_type,
-                itunes_client  = self._itunes_client,
+                spotify_client = self._spotify_client,
                 yt_extractor   = self._yt_extractor,
             )
             if not self._closing.is_set():
