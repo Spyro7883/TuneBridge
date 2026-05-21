@@ -1786,6 +1786,20 @@ class TuneBridgeApp(QMainWindow):
                     # fallback: strip tb_xxxxxxxx_ prefix only
                     _clean = re.sub(r"^tb_[0-9a-f]{8}_", "", Path(temp).name)
                 dest_candidate = Path(result) / _clean
+                # CR-03: never silently overwrite the user's existing file.
+                # If a file with the computed name already exists in the
+                # destination folder (e.g. user downloaded the same Spotify
+                # track in 440 Hz mode last week and may have re-tagged it),
+                # append " (2)", " (3)" until a free name is found.
+                if dest_candidate.exists():
+                    _stem, _suf = dest_candidate.stem, dest_candidate.suffix
+                    _i = 2
+                    while True:
+                        _alt = dest_candidate.with_name(f"{_stem} ({_i}){_suf}")
+                        if not _alt.exists():
+                            dest_candidate = _alt
+                            break
+                        _i += 1
                 tmp_dest = dest_candidate.with_suffix(dest_candidate.suffix + ".tmp")
                 if tmp_dest.exists():
                     tmp_dest.unlink(missing_ok=True)
