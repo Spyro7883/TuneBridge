@@ -1,5 +1,9 @@
 # TuneBridge
 
+[![CI](https://github.com/Spyro7883/TuneBridge/actions/workflows/ci.yml/badge.svg)](https://github.com/Spyro7883/TuneBridge/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+
 A desktop app that takes Spotify or YouTube track URLs, finds the best audio match on YouTube, downloads it, optionally retunes from 440 Hz to 432 Hz, organizes files into your existing folder structure, and uploads them to iBroadcast — all in one automated pipeline.
 
 ![TuneBridge UI](docs/screenshot.png)
