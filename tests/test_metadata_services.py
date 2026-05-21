@@ -9,7 +9,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from tunebridge import (
-    ItunesClient,
+    SpotifyClient,
     TuneBridgeApp,
     YoutubeExtractor,
     fetch_metadata_for_row,
@@ -39,6 +39,11 @@ _SPOTIFY_TRACK_HTML = (
     '<meta property="og:title" content="Blinding Lights">'
     '<meta property="og:description" content="The Weeknd &middot; After Hours &middot; Song &middot; 2019">'
 )
+_SPOTIFY_TRACK_HTML_WITH_DURATION = (
+    '<meta property="og:title" content="Blinding Lights">'
+    '<meta property="og:description" content="The Weeknd &middot; After Hours &middot; Song &middot; 2019">'
+    ">3:20</span>"
+)
 _SPOTIFY_ALBUM_HTML = (
     '<meta property="og:title" content="After Hours">'
     '<meta property="og:description" content="The Weeknd &middot; Album &middot; 2020">'
@@ -54,13 +59,13 @@ _YT_INFO = {
 
 
 # ---------------------------------------------------------------------------
-# ItunesClient — Spotify page OG tag scraping
+# SpotifyClient — Spotify page OG tag scraping
 # ---------------------------------------------------------------------------
 
 
-def test_itunes_get_metadata_track_returns_required_keys():
+def test_spotify_get_metadata_track_returns_required_keys():
     """get_metadata for a track must return artist, track_title, album, release_type."""
-    client = ItunesClient()
+    client = SpotifyClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
         mock_get.return_value.text = _SPOTIFY_TRACK_HTML
@@ -69,9 +74,9 @@ def test_itunes_get_metadata_track_returns_required_keys():
         assert key in result, f"Missing key: {key}"
 
 
-def test_itunes_get_metadata_track_values_correct():
+def test_spotify_get_metadata_track_values_correct():
     """Track metadata values must come from og:title and og:description."""
-    client = ItunesClient()
+    client = SpotifyClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
         mock_get.return_value.text = _SPOTIFY_TRACK_HTML
@@ -81,9 +86,9 @@ def test_itunes_get_metadata_track_values_correct():
     assert result["release_type"] == "single"
 
 
-def test_itunes_get_metadata_album_values_correct():
+def test_spotify_get_metadata_album_values_correct():
     """Album metadata must set release_type='album' and use og:title as both track_title and album."""
-    client = ItunesClient()
+    client = SpotifyClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
         mock_get.return_value.text = _SPOTIFY_ALBUM_HTML
@@ -94,62 +99,36 @@ def test_itunes_get_metadata_album_values_correct():
     assert result["release_type"] == "album"
 
 
-def test_itunes_http_error_raises():
-    """HTTP error from oEmbed must propagate as an exception."""
+def test_spotify_http_error_raises():
+    """HTTP error from Spotify page must propagate as an exception."""
     import requests as _req
-    client = ItunesClient()
+    client = SpotifyClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status.side_effect = _req.HTTPError("503")
         with pytest.raises(Exception):
             client.get_metadata("https://open.spotify.com/track/x", "track")
 
 
-def test_get_metadata_populates_duration_ms():
-    """C-02: get_metadata for a track must invoke search_duration_ms and include duration_ms."""
-    client = ItunesClient()
+def test_get_metadata_populates_duration_ms_from_html():
+    """C-02: get_metadata must extract duration_ms from the MM:SS span in the Spotify page HTML."""
+    client = SpotifyClient()
     with patch("tunebridge.requests.get") as mock_get:
-        # First call: og-tag HTML for /track/
-        og_resp = MagicMock()
-        og_resp.raise_for_status = MagicMock()
-        og_resp.text = _SPOTIFY_TRACK_HTML
-        # Subsequent call(s): iTunes search JSON
-        itunes_resp = MagicMock()
-        itunes_resp.raise_for_status = MagicMock()
-        itunes_resp.json.return_value = {
-            "results": [
-                {"artistName": "The Weeknd", "trackName": "Blinding Lights", "trackTimeMillis": 200040}
-            ]
-        }
-        mock_get.side_effect = [og_resp, itunes_resp, itunes_resp, itunes_resp]
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.text = _SPOTIFY_TRACK_HTML_WITH_DURATION
         result = client.get_metadata("https://open.spotify.com/track/x", "track")
     assert "duration_ms" in result
-    assert result["duration_ms"] == 200040
+    assert result["duration_ms"] == (3 * 60 + 20) * 1000  # 200_000 ms
 
 
-def test_get_metadata_album_does_not_query_duration():
-    """C-02: album fetches must NOT call search_duration_ms (album-level durations meaningless)."""
-    client = ItunesClient()
+def test_get_metadata_album_does_not_include_duration():
+    """Album fetches must NOT include duration_ms (album-level durations are meaningless)."""
+    client = SpotifyClient()
     with patch("tunebridge.requests.get") as mock_get:
         mock_get.return_value.raise_for_status = MagicMock()
         mock_get.return_value.text = _SPOTIFY_ALBUM_HTML
         result = client.get_metadata("https://open.spotify.com/album/x", "album")
-    # Only one call (the OG-tag fetch) — no iTunes lookup
     assert mock_get.call_count == 1
     assert "duration_ms" not in result
-
-
-def test_itunes_search_duration_ms_returns_int_on_match():
-    """C-01: search_duration_ms must NOT raise NameError on _norm_str; returns trackTimeMillis on fuzzy match."""
-    client = ItunesClient()
-    with patch("tunebridge.requests.get") as mock_get:
-        mock_get.return_value.raise_for_status = MagicMock()
-        mock_get.return_value.json.return_value = {
-            "results": [
-                {"artistName": "Some Artist", "trackName": "Some Track", "trackTimeMillis": 183000}
-            ]
-        }
-        result = client.search_duration_ms("Some Artist", "Some Track")
-    assert result == 183000
 
 
 # ---------------------------------------------------------------------------
@@ -225,26 +204,26 @@ def test_youtube_extract_error_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_metadata_routes_spotify_url_to_itunes_client():
-    """Spotify URL must call ItunesClient, never YoutubeExtractor."""
-    mock_it = MagicMock()
-    mock_it.get_metadata.return_value = {
+def test_fetch_metadata_routes_spotify_url_to_spotify_client():
+    """Spotify URL must call SpotifyClient, never YoutubeExtractor."""
+    mock_sp = MagicMock()
+    mock_sp.get_metadata.return_value = {
         "artist": "A", "track_title": "T", "album": "B", "release_type": "single",
     }
     mock_yt = MagicMock()
     fetch_metadata_for_row(
         url="https://open.spotify.com/track/abc123",
         url_type="Spotify",
-        itunes_client=mock_it,
+        spotify_client=mock_sp,
         yt_extractor=mock_yt,
     )
-    mock_it.get_metadata.assert_called_once()
+    mock_sp.get_metadata.assert_called_once()
     mock_yt.extract_metadata.assert_not_called()
 
 
 def test_fetch_metadata_routes_youtube_url_to_yt_extractor():
-    """YouTube URL must call YoutubeExtractor, never ItunesClient."""
-    mock_it = MagicMock()
+    """YouTube URL must call YoutubeExtractor, never SpotifyClient."""
+    mock_sp = MagicMock()
     mock_yt = MagicMock()
     mock_yt.extract_metadata.return_value = {
         "title": "T", "channel": "C",
@@ -253,23 +232,23 @@ def test_fetch_metadata_routes_youtube_url_to_yt_extractor():
     fetch_metadata_for_row(
         url="https://www.youtube.com/watch?v=xyz",
         url_type="YouTube",
-        itunes_client=mock_it,
+        spotify_client=mock_sp,
         yt_extractor=mock_yt,
     )
     mock_yt.extract_metadata.assert_called_once()
-    mock_it.get_metadata.assert_not_called()
+    mock_sp.get_metadata.assert_not_called()
 
 
 def test_fetch_metadata_result_includes_source_spotify():
     """Result dict must have source='Spotify' for Spotify rows."""
-    mock_it = MagicMock()
-    mock_it.get_metadata.return_value = {
+    mock_sp = MagicMock()
+    mock_sp.get_metadata.return_value = {
         "artist": "A", "track_title": "T", "album": "B", "release_type": "album",
     }
     result = fetch_metadata_for_row(
         url="https://open.spotify.com/track/x",
         url_type="Spotify",
-        itunes_client=mock_it,
+        spotify_client=mock_sp,
         yt_extractor=MagicMock(),
     )
     assert result.get("source") == "Spotify"
@@ -285,7 +264,7 @@ def test_fetch_metadata_result_includes_source_youtube():
     result = fetch_metadata_for_row(
         url="https://www.youtube.com/watch?v=abc",
         url_type="YouTube",
-        itunes_client=MagicMock(),
+        spotify_client=MagicMock(),
         yt_extractor=mock_yt,
     )
     assert result.get("source") == "YouTube"
@@ -293,17 +272,17 @@ def test_fetch_metadata_result_includes_source_youtube():
 
 def test_fetch_metadata_spotify_album_url_passes_album_resource_type():
     """Spotify album URL must call get_metadata with resource_type='album'."""
-    mock_it = MagicMock()
-    mock_it.get_metadata.return_value = {
+    mock_sp = MagicMock()
+    mock_sp.get_metadata.return_value = {
         "artist": "A", "track_title": "B", "album": "B", "release_type": "album",
     }
     fetch_metadata_for_row(
         url="https://open.spotify.com/album/xyz789",
         url_type="Spotify",
-        itunes_client=mock_it,
+        spotify_client=mock_sp,
         yt_extractor=MagicMock(),
     )
-    _, resource_type_arg = mock_it.get_metadata.call_args[0]
+    _, resource_type_arg = mock_sp.get_metadata.call_args[0]
     assert resource_type_arg == "album"
 
 
