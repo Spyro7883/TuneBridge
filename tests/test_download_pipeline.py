@@ -95,6 +95,42 @@ def test_find_best_yt_match_returns_none_when_no_candidate_matches(tmp_path):
         assert _find_best_yt_match("Song Alpha", "Artist One") is None
 
 
+def test_find_best_yt_match_penalises_spanish_portuguese_live(tmp_path):
+    """WR-07: live videos with ES/PT keywords (concierto, en directo, ao vivo,
+    en gira) must lose to official audio uploads even when their view counts
+    are higher. Regression for high-view show recordings outranking studio audio."""
+    candidates = [
+        # High-view live recording with non-English live indicator
+        {"id": "live_es", "title": "Artist One - Song Alpha (En Concierto)",
+         "channel": "Some Label LA", "duration": 230, "view_count": 50_000_000},
+        # Official audio: lower views, exact duration match
+        {"id": "audio_ok", "title": "Song Alpha (Audio)",
+         "channel": "Some Label VEVO", "duration": 215, "view_count": 100_000},
+    ]
+    with patch("tunebridge._search_yt_candidates", return_value=candidates):
+        url = _find_best_yt_match("Song Alpha", "Artist One",
+                                  duration_ms=215_000)
+    assert url == "https://music.youtube.com/watch?v=audio_ok", (
+        f"WR-07 regression: live (ES keyword) outranked official audio → {url}"
+    )
+
+
+def test_find_best_yt_match_allows_live_when_spotify_title_is_live(tmp_path):
+    """WR-07: penalty must NOT apply if the Spotify track itself is a live
+    recording (e.g. 'Song (En Vivo)')."""
+    candidates = [
+        {"id": "live_match", "title": "Artist - Song (En Vivo)",
+         "channel": "Artist Official", "duration": 200, "view_count": 1_000_000},
+        {"id": "studio", "title": "Artist - Song",
+         "channel": "Artist Official", "duration": 200, "view_count": 1_000_000},
+    ]
+    with patch("tunebridge._search_yt_candidates", return_value=candidates):
+        url = _find_best_yt_match("Song (En Vivo)", "Artist", duration_ms=200_000)
+    assert url == "https://music.youtube.com/watch?v=live_match", (
+        f"WR-07: live YT result wrongly penalised for live Spotify title → {url}"
+    )
+
+
 def test_download_worker_spotify_uses_yt_music_url(window):
     """DL-01: Spotify path calls download_track_for_row with a YouTube Music URL."""
     metadata = {"artist": "Massive Attack", "track_title": "Teardrop", "source": "Spotify"}
