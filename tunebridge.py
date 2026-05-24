@@ -562,11 +562,24 @@ def _find_best_yt_match(title: str, artist: str, duration_ms: int = 0) -> str | 
             "(audio)", "[audio]", "| audio",
         )):
             score += 4.0
-        # Penalise remix/live versions when the Spotify title has no such qualifier
-        if _version_kw is None and any(kw in vid_l for kw in (
-            "remix", "en vivo", "live", "behind the scenes", "concert",
-        )) and not any(kw in title_l for kw in ("remix", "en vivo", "live")):
-            score -= 3.0
+        # Penalise remix/live versions when the Spotify title has no such qualifier.
+        # WR-07: extended keyword list with ES/PT live indicators (en directo,
+        # ao vivo, concierto, en gira) — show/tour-recorded videos bypassed the
+        # English-only check and outranked official audio uploads. Penalty
+        # raised -3 -> -5 so high view-count live videos can't overcome it via
+        # the log10(views) bonus (capped at +5).
+        _LIVE_KWS = (
+            "remix", "live", "en vivo", "en directo", "ao vivo",
+            "concert", "concierto", "en concierto", "en gira",
+            "behind the scenes",
+        )
+        _SPOTIFY_LIVE_KWS = (
+            "remix", "live", "en vivo", "en directo", "ao vivo",
+            "concierto", "en concierto",
+        )
+        if _version_kw is None and any(kw in vid_l for kw in _LIVE_KWS) \
+                and not any(kw in title_l for kw in _SPOTIFY_LIVE_KWS):
+            score -= 5.0
 
         scored.append((score, c))
 
