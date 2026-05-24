@@ -283,6 +283,58 @@ def test_folder_batch_done_waits_for_all_downloads(window):
     assert emitted == ["done"], "folder_batch_done should fire exactly once after all rows resolved"
 
 
+def test_folder_batch_done_fires_when_late_download_fails(window):
+    """WR-06: if the last download fails AFTER all other folder dialogs resolved,
+    _on_download_row_finished must re-check the batch_done condition and emit.
+
+    Scenario: 4 rows. 3 succeed download → folder dialog → status=Uploading
+    (so _folder_done=3). The 4th hangs in yt-dlp, eventually fails. Without
+    the WR-06 re-check, _folder_total shrinks 4→3 but folder_batch_done
+    never fires → UI deadlocks (paste box stays locked, upload never starts).
+    """
+    window._download_total = 4
+    window._download_done = 3
+    window._download_failed = 0
+    window._folder_total = 4
+    window._folder_done = 3
+    window._folder_skipped = 0
+    window._folder_failed = 0
+
+    emitted = []
+    window._dispatcher.folder_batch_done.connect(lambda: emitted.append("done"))
+
+    # The 4th download fails (e.g. yt-dlp exhausted all cookie variants)
+    window._on_download_row_finished(3, SongStatus.FAILED_DOWNLOAD.value)
+
+    assert window._folder_total == 3, "C-05: _folder_total must shrink on failed download"
+    assert emitted == ["done"], (
+        "WR-06 regression: folder_batch_done did not fire after _folder_total "
+        "shrank to match already-resolved folder count → UI would deadlock"
+    )
+
+
+def test_folder_batch_done_not_double_fired_on_successive_failures(window):
+    """WR-06: strict == guard prevents double emission when multiple
+    downloads fail after folder_batch_done already fired."""
+    window._download_total = 4
+    window._download_done = 2
+    window._download_failed = 0
+    window._folder_total = 4
+    window._folder_done = 2
+    window._folder_skipped = 0
+    window._folder_failed = 0
+
+    emitted = []
+    window._dispatcher.folder_batch_done.connect(lambda: emitted.append("done"))
+
+    # First failure: _folder_total 4→3, finished=2 < 3 → no emit yet
+    window._on_download_row_finished(2, SongStatus.FAILED_DOWNLOAD.value)
+    assert emitted == []
+    # Second failure: _folder_total 3→2, finished=2 == 2 → emit
+    window._on_download_row_finished(3, SongStatus.FAILED_DOWNLOAD.value)
+    assert emitted == ["done"]
+
+
 def test_save_does_not_clobber_existing_file_on_partial_failure(window, tmp_path):
     """C-04: if shutil.move fails mid-save, the user's pre-existing file at dest is preserved."""
     temp_mp3 = tmp_path / "track.mp3"

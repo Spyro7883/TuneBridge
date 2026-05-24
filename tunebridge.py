@@ -2180,6 +2180,21 @@ class TuneBridgeApp(QMainWindow):
             # which let batch_done fire early when row 1's dialog resolved
             # before rows 2/3 reached AWAITING.
             self._folder_total = max(0, self._folder_total - 1)
+            # WR-06: if all surviving folder dialogs already resolved before
+            # this download failed, _on_folder_row_finished returned early
+            # (finished < old _folder_total) and never emitted
+            # folder_batch_done. After shrinking, re-check the equality and
+            # fire so the upload batch can start. Strict == guards against
+            # double-emission when multiple downloads fail in succession.
+            folder_finished = (
+                self._folder_done + self._folder_skipped + self._folder_failed
+            )
+            if self._folder_total > 0 and folder_finished == self._folder_total:
+                self._dispatcher.folder_batch_done.emit()
+                self.statusBar().showMessage(
+                    f"Saved {self._folder_done}, skipped {self._folder_skipped}, "
+                    f"failed {self._folder_failed}"
+                )
         finished = self._download_done + self._download_failed
 
         if finished < self._download_total:
