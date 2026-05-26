@@ -19,6 +19,7 @@ from tunebridge import (
     SongStatus,
     _download_lock,
     _find_best_yt_match,
+    classify_url,
     download_track_for_row,
     retune_file,
 )
@@ -349,3 +350,40 @@ def test_failed_save_preserves_valid_card_count(window):
     window.table.update_row_status(0, "Failed — metadata")
     assert window._card_valid.count() == 2, "Failed — metadata must decrement valid"
     assert window._card_invalid.count() == 1, "Failed — metadata must increment invalid"
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Local File Upload (RED gate)
+# ---------------------------------------------------------------------------
+
+
+def test_classify_url_local_file_positive(tmp_path):
+    """LOCAL-01: classify_url returns Local File for existing audio paths."""
+    for ext in (".mp3", ".flac", ".wav"):
+        p = tmp_path / f"song{ext}"
+        p.write_bytes(b"\x00")
+        assert classify_url(str(p)) == "Local File"
+
+
+def test_classify_url_local_file_nonexistent_returns_none(tmp_path):
+    """LOCAL-01: non-existent audio path is None; Spotify/YouTube unaffected."""
+    p = tmp_path / "missing.mp3"
+    assert classify_url(str(p)) is None
+    assert classify_url("https://open.spotify.com/track/abc") == "Spotify"
+    assert classify_url("https://www.youtube.com/watch?v=abc123") == "YouTube"
+
+
+def test_download_worker_local_file_copies(window, tmp_path):
+    """LOCAL-03: Local File branch copies via shutil.copy2, never calls yt-dlp."""
+    src = tmp_path / "Song Alpha.mp3"
+    src.write_bytes(b"FAKE_AUDIO")
+    emitted = []
+    window._dispatcher.row_status_changed.connect(lambda r, s: emitted.append((r, s)))
+    metadata = {"track_title": "Song Alpha", "artist": "Artist One"}
+    with patch("tunebridge.download_track_for_row") as mock_dl:
+        window._download_worker(0, str(src), "Local File", metadata, 440)
+    mock_dl.assert_not_called()
+    awaiting = [s for r, s in emitted if r == 0 and s == SongStatus.AWAITING.value]
+    assert awaiting, f"Expected AWAITING status, got: {emitted}"
+    assert window._temp_paths[0].name == "Song Alpha.mp3"
+    assert window._temp_paths[0].exists()

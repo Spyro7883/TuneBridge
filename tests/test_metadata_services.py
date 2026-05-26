@@ -12,6 +12,7 @@ from tunebridge import (
     SpotifyClient,
     TuneBridgeApp,
     YoutubeExtractor,
+    fetch_local_metadata,
     fetch_metadata_for_row,
 )
 
@@ -340,3 +341,58 @@ def test_batch_table_update_row_metadata_youtube_label_round_trip(window):
     assert "Song" in url_item.text()
 
 
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Local File Upload metadata (RED gate)
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_local_metadata_reads_tags(tmp_path):
+    """LOCAL-02: fetch_local_metadata reads title/artist/album from tags."""
+    p = tmp_path / "track.mp3"
+    p.write_bytes(b"\x00")
+    fake_audio = {
+        "title": ["Song Alpha"],
+        "artist": ["Artist One"],
+        "album": ["Album One"],
+    }
+    info = MagicMock()
+    info.length = 0
+    fake_audio_obj = MagicMock()
+    fake_audio_obj.get.side_effect = fake_audio.get
+    fake_audio_obj.info = info
+    with patch("tunebridge.mutagen.File", return_value=fake_audio_obj):
+        meta = fetch_local_metadata(str(p))
+    assert meta["track_title"] == "Song Alpha"
+    assert meta["artist"] == "Artist One"
+    assert meta["album"] == "Album One"
+
+
+def test_fetch_local_metadata_filename_fallback(tmp_path):
+    """LOCAL-02: missing tags fall back to filename stem, empty artist."""
+    p = tmp_path / "Song Beta.wav"
+    p.write_bytes(b"RIFF....")
+    with patch("tunebridge.mutagen.File", return_value=None):
+        meta = fetch_local_metadata(str(p))
+    assert meta["track_title"] == "Song Beta"
+    assert meta["artist"] == ""
+    assert meta["duration_ms"] == 0
+
+
+def test_fetch_metadata_for_row_routes_local_file():
+    """LOCAL-02: Local File routes to fetch_local_metadata, no Spotify/YT calls."""
+    expected = {"track_title": "Song Alpha", "artist": "Artist One", "duration_ms": 0}
+    spotify_client = MagicMock()
+    yt_extractor = MagicMock()
+    with patch("tunebridge.fetch_local_metadata", return_value=expected) as mock_local:
+        result = fetch_metadata_for_row(
+            "C:/x/Song Alpha.mp3", "Local File",
+            spotify_client=spotify_client, yt_extractor=yt_extractor,
+        )
+    assert result == expected
+    mock_local.assert_called_once_with("C:/x/Song Alpha.mp3")
+    spotify_client.assert_not_called()
+    yt_extractor.assert_not_called()
+    assert not spotify_client.method_calls
+    assert not yt_extractor.method_calls
