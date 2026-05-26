@@ -25,6 +25,7 @@ from pathlib import Path
 import html as _html
 from dotenv import load_dotenv
 import librosa
+import mutagen
 import numpy as np
 import requests
 import soundfile as sf
@@ -632,6 +633,8 @@ def classify_url(url: str) -> str | None:
         return "Spotify"
     if _YOUTUBE_RE.search(url):
         return "YouTube"
+    if Path(url).suffix.lower() in (".mp3", ".flac", ".wav") and Path(url).exists():
+        return "Local File"
     return None
 
 
@@ -939,6 +942,45 @@ _SPOTIFY_RESOURCE_RE = re.compile(
 )
 
 
+def fetch_local_metadata(path: str) -> dict:
+    """Read ID3/format tags from a local audio file via mutagen.
+
+    Returns the same dict shape as Spotify/YouTube metadata. Never raises:
+    falls back to the filename stem (empty artist) when tags are absent (D-05).
+    """
+    track_title = ""
+    artist = ""
+    album = ""
+    duration_ms = 0
+    try:
+        audio = mutagen.File(path, easy=True)
+        if audio is not None:
+            def _first(key: str) -> str:
+                val = audio.get(key)
+                if isinstance(val, list):
+                    return str(val[0]) if val else ""
+                return str(val) if val else ""
+            track_title = _first("title")
+            artist = _first("artist")
+            album = _first("album")
+            info = getattr(audio, "info", None)
+            if info is not None and getattr(info, "length", 0):
+                duration_ms = int(info.length * 1000)
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Local metadata read failed for %s: %s", path, exc
+        )
+    if not track_title:
+        track_title = Path(path).stem
+    return {
+        "track_title": track_title,
+        "artist": artist,
+        "album": album,
+        "duration_ms": duration_ms,
+        "source": "local",
+    }
+
+
 def fetch_metadata_for_row(
     url: str,
     url_type: str,
@@ -957,6 +999,8 @@ def fetch_metadata_for_row(
         metadata = spotify_client.get_metadata(url, resource_type)
         metadata["source"] = "Spotify"
         return metadata
+    elif url_type == "Local File":
+        return fetch_local_metadata(url)
     else:  # YouTube
         metadata = yt_extractor.extract_metadata(url)
         metadata["source"] = "YouTube"
@@ -1510,6 +1554,12 @@ class TuneBridgeApp(QMainWindow):
 
         toolbar_row.addWidget(self._btn_440)
         toolbar_row.addWidget(self._btn_432)
+
+        self._btn_add_files = QPushButton("Add Files")
+        self._btn_add_files.setObjectName("add_files_btn")
+        self._btn_add_files.clicked.connect(self._on_add_files_clicked)
+        toolbar_row.addWidget(self._btn_add_files)
+
         toolbar_row.addStretch()
 
         self._btn_start = QPushButton("Start Processing")
@@ -1633,6 +1683,45 @@ class TuneBridgeApp(QMainWindow):
         self._paste_box.setFocus()
         self._refresh_start_button()   # re-evaluate after new rows added
 
+    def _on_add_files_clicked(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Add local audio files",
+            "",
+            "Audio Files (*.mp3 *.flac *.wav)",
+        )
+        if paths:
+            self._process_local_files(paths)
+
+    def _process_local_files(self, paths: list[str]) -> None:
+        """Inject local audio files as 'Local File' rows (mirrors _process_urls, D-09)."""
+        if not paths:
+            return
+        self.table.remove_completed_rows()
+        valid_count = 0
+        invalid_count = 0
+        for path in paths:
+            url_type = classify_url(path)
+            if url_type == "Local File":
+                row_id = self.table.add_row(url=path, url_type=url_type)
+                valid_count += 1
+                self._dispatcher.row_status_changed.emit(
+                    row_id, SongStatus.FETCHING.value
+                )
+                self._executor.submit(
+                    self._metadata_worker, row_id, path, "Local File"
+                )
+            else:
+                self.table.add_row(url=path, url_type="Invalid URL")
+                invalid_count += 1
+        self._card_valid.set_count(self._card_valid.count() + valid_count)
+        self._card_invalid.set_count(self._card_invalid.count() + invalid_count)
+        if valid_count > 0:
+            self.statusBar().showMessage(
+                f"{valid_count} added — add more or start processing"
+            )
+        self._refresh_start_button()
+
     def _clear_all(self) -> None:
         """Explicit clear — also triggered via table._on_clear."""
         self.table.clear()
@@ -1703,6 +1792,10 @@ class TuneBridgeApp(QMainWindow):
                         "Not found on YouTube Music — paste a direct YouTube URL instead."
                     )
                 downloaded = download_track_for_row(yt_url, row_tmp)
+            elif url_type == "Local File":
+                dst = row_tmp / Path(url).name
+                shutil.copy2(url, dst)
+                downloaded = dst
             else:
                 downloaded = download_track_for_row(url, row_tmp)
             if not downloaded:
@@ -2236,6 +2329,7 @@ class TuneBridgeApp(QMainWindow):
         self._paste_box.setReadOnly(False)
         self._btn_440.setEnabled(True)
         self._btn_432.setEnabled(True)
+        self._btn_add_files.setEnabled(True)
         self._paste_box.setFocus()
 
     def _refresh_start_button(self, _row_id: int = 0, _status: str = "") -> None:
@@ -2291,6 +2385,7 @@ class TuneBridgeApp(QMainWindow):
         self._btn_start.setEnabled(False)
         self._btn_440.setEnabled(False)
         self._btn_432.setEnabled(False)
+        self._btn_add_files.setEnabled(False)
 
         # W-09: if setup raises (e.g. _executor.submit hits a shutdown executor
         # from a parallel closeEvent), unwind UI lock so the user isn't trapped.
