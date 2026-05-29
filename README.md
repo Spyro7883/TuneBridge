@@ -4,13 +4,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-A desktop app that takes Spotify or YouTube track URLs, finds the best audio match on YouTube, downloads it, optionally retunes from 440 Hz to 432 Hz, organizes files into your existing folder structure, and uploads them to iBroadcast — all in one automated pipeline.
+A desktop app that takes Spotify or YouTube track URLs — or local audio files — finds the best audio match on YouTube, downloads it, optionally retunes from 440 Hz to 432 Hz, organizes files into your existing folder structure, and uploads them to iBroadcast — all in one automated pipeline.
 
 ![TuneBridge UI](docs/screenshot.png)
 
 ## Features
 
-- **Dual input** — paste Spotify URLs or YouTube URLs (mixed batches supported)
+- **Flexible input** — paste Spotify URLs or YouTube URLs (mixed batches supported), or add local audio files via **Add Files**
+- **Local file upload** — pull in MP3/FLAC/WAV files from disk; metadata is read from embedded tags (with filename fallback) and the same retune/organize/upload pipeline applies
 - **Spotify metadata** — scrapes track title, artist, album, and duration from the public Spotify page (no API key required)
 - **YouTube audio matching** — searches YouTube via yt-dlp and picks the best audio-only match using duration and title scoring
 - **Batch downloads** — parallel downloads with dynamic thread count based on queue size
@@ -50,7 +51,7 @@ IBROADCAST_PASSWORD=yourpassword
 python tunebridge.py
 ```
 
-1. Paste one or more Spotify or YouTube URLs into the input box (one per line)
+1. Paste one or more Spotify or YouTube URLs into the input box (one per line), and/or click **Add Files** to pick local audio files
 2. Select **440 Hz** or **432 Hz** for the batch
 3. Click **Start Processing**
 4. Confirm the destination folder for each song as it completes
