@@ -896,6 +896,11 @@ class SpotifyClient:
 
     _OG_TITLE_RE = re.compile(r'<meta property="og:title" content="([^"]+)"')
     _OG_DESC_RE  = re.compile(r'<meta property="og:description" content="([^"]+)"')
+    _OG_IMAGE_RE = re.compile(r'<meta property="og:image" content="([^"]+)"')
+    _JSONLD_RE   = re.compile(
+        r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
+        re.DOTALL,
+    )
     _HEADERS     = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
     def get_metadata(self, spotify_url: str, resource_type: str) -> dict:
@@ -926,6 +931,21 @@ class SpotifyClient:
                 "album":        title,
                 "release_type": "album",
             }
+        m_img = self._OG_IMAGE_RE.search(html)
+        cover_url = _html.unescape(m_img.group(1)) if m_img else ""
+
+        album = ""
+        for m_ld in self._JSONLD_RE.finditer(html):
+            try:
+                ld = json.loads(m_ld.group(1))
+                if ld.get("@type") == "MusicRecording":
+                    in_album = ld.get("inAlbum")
+                    if isinstance(in_album, dict):
+                        album = in_album.get("name", "") or ""
+                    break
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                continue
+
         duration_ms = None
         m_dur = re.search(r">(\d{1,2}):(\d{2})</span>", html)
         if m_dur:
@@ -933,9 +953,10 @@ class SpotifyClient:
         return {
             "artist":       artist,
             "track_title":  title,
-            "album":        "",
+            "album":        album,
             "release_type": "single",
             "duration_ms":  duration_ms,
+            "cover_url":    cover_url,
         }
 
 
@@ -974,6 +995,7 @@ class YoutubeExtractor:
             result["track_title"] = track_part
         else:
             result["track_title"] = raw_title
+        result["cover_url"] = info.get("thumbnail") or ""
         return result
 
 
