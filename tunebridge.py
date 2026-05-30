@@ -1001,6 +1001,12 @@ class YoutubeExtractor:
             # name so iBroadcast shows it instead of "Unknown Artist".
             if result["channel"]:
                 result["artist"] = result["channel"]
+        # YouTube Music / "- Topic" / Art Track uploads carry a real album in the
+        # info dict. Use it when present; plain videos omit it, leaving album empty
+        # so _write_id3_tags falls back to the track title.
+        album = info.get("album") or ""
+        if album:
+            result["album"] = album
         result["cover_url"] = info.get("thumbnail") or ""
         return result
 
