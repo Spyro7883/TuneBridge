@@ -203,6 +203,29 @@ def test_youtube_track_title_parsed_from_title():
         assert "(guessed)" not in result["track_title"]
 
 
+def test_youtube_extract_returns_album_from_info():
+    """When yt-dlp provides a real album (YouTube Music / Topic), use it verbatim."""
+    extractor = YoutubeExtractor()
+    info = {**_YT_INFO, "album": "Sample Album"}
+    with patch("tunebridge.yt_dlp.YoutubeDL") as MockYDL:
+        inst = MockYDL.return_value.__enter__.return_value
+        inst.extract_info.return_value = info
+        result = extractor.extract_metadata("https://www.youtube.com/watch?v=dummyid123")
+    assert result["album"] == "Sample Album"
+
+
+def test_youtube_extract_no_album_field_when_info_lacks_album():
+    """Plain YouTube videos carry no album; extractor must not invent one
+    (the track-title fallback in _write_id3_tags handles that case)."""
+    extractor = YoutubeExtractor()
+    info = {k: v for k, v in _YT_INFO.items() if k != "album"}
+    with patch("tunebridge.yt_dlp.YoutubeDL") as MockYDL:
+        inst = MockYDL.return_value.__enter__.return_value
+        inst.extract_info.return_value = info
+        result = extractor.extract_metadata("https://www.youtube.com/watch?v=dummyid123")
+    assert not result.get("album")
+
+
 def test_youtube_extract_error_raises():
     """yt-dlp failure must raise an exception, not return None silently."""
     extractor = YoutubeExtractor()
