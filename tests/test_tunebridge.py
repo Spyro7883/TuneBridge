@@ -235,6 +235,21 @@ def test_remove_selected_rows_decrements_invalid_stat_card(window):
     assert window._card_invalid.count() == before - 1
 
 
+def test_removing_completed_row_reenables_start_button(window):
+    # UI-01 regression: a finished row left Start disabled; deleting it must
+    # re-evaluate Start so a remaining METADATA_READY row is processable.
+    done_id = window.table.add_row(url="https://open.spotify.com/track/done", url_type="Spotify")
+    ready_id = window.table.add_row(url="https://www.youtube.com/watch?v=ready", url_type="YouTube")
+    window.table.update_row_status(done_id, "Uploaded")
+    window.table.update_row_status(ready_id, SongStatus.METADATA_READY.value)
+    window._refresh_start_button()
+    assert window._btn_start.isEnabled() is False  # not all rows ready yet
+    window.table._table.selectRow(done_id)
+    window.table.remove_selected_rows()
+    # After deleting the completed row, the lone METADATA_READY row must enable Start
+    assert window._btn_start.isEnabled() is True
+
+
 def test_batch_table_invalid_url_row(window):
     row_id = window.table.add_row(url="https://bad.example.com", url_type="Invalid URL")
     type_item = window.table._table.item(row_id, 1)
