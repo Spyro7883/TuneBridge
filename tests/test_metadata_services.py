@@ -179,6 +179,19 @@ def test_youtube_artist_parsed_from_title():
         assert "(guessed)" not in result["artist"]
 
 
+def test_youtube_artist_falls_back_to_channel_when_no_separator():
+    """When the title has no ' - ' separator, artist falls back to the channel name
+    so iBroadcast shows the uploader instead of 'Unknown Artist'."""
+    extractor = YoutubeExtractor()
+    info = {**_YT_INFO, "title": "Some Track Title", "channel": "ArtistOneVEVO"}
+    with patch("tunebridge.yt_dlp.YoutubeDL") as MockYDL:
+        inst = MockYDL.return_value.__enter__.return_value
+        inst.extract_info.return_value = info
+        result = extractor.extract_metadata("https://www.youtube.com/watch?v=dummyid123")
+    assert result["artist"] == "ArtistOneVEVO"
+    assert result["track_title"] == "Some Track Title"
+
+
 def test_youtube_track_title_parsed_from_title():
     """Track title parsed from video title must be set without any suffix."""
     extractor = YoutubeExtractor()
