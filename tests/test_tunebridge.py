@@ -8,6 +8,11 @@ import pytest
 from PySide6.QtCore import QMimeData
 from PySide6.QtWidgets import QApplication
 
+from unittest.mock import MagicMock, patch
+from pathlib import Path
+
+from mutagen.id3 import ID3, APIC
+
 from tunebridge import (
     BatchTable,
     PasteTextEdit,
@@ -16,6 +21,9 @@ from tunebridge import (
     TuneBridgeApp,
     _Dispatcher,
     classify_url,
+    _write_id3_tags,
+    _fetch_cover_bytes,
+    _sniff_mime,
 )
 
 
@@ -278,3 +286,140 @@ def test_worker_count_formula():
     assert min(cap, cap) == cap
     assert min(cap + 1, cap) == cap
     assert min(cap + 100, cap) == cap
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — Cover Art & Album Metadata (ART-01, ART-03, ART-04, ART-05)
+# RED-gate: _fetch_cover_bytes / _sniff_mime do not exist yet → ImportError
+# ---------------------------------------------------------------------------
+
+_FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+_FAKE_PNG  = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+
+def _make_empty_mp3(path: Path) -> None:
+    from mutagen.id3 import ID3
+    ID3().save(str(path))
+
+
+def _mock_streaming_get(chunks, ok=True):
+    """Build a MagicMock matching `with requests.get(...) as resp:` + iter_content."""
+    resp = MagicMock()
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    resp.ok = ok
+    resp.iter_content.return_value = list(chunks)
+    return resp
+
+
+def test_write_id3_tags_embeds_apic(tmp_path):
+    mp3 = tmp_path / "track.mp3"
+    _make_empty_mp3(mp3)
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value = _mock_streaming_get([_FAKE_JPEG])
+        _write_id3_tags(mp3, {
+            "track_title": "Sample Track",
+            "artist": "Sample Artist",
+            "album": "Sample Album",
+            "cover_url": "https://i.scdn.co/image/x",
+        })
+    apics = ID3(str(mp3)).getall("APIC")
+    assert len(apics) == 1
+    assert apics[0].type == 3
+    assert apics[0].data[:3] == b"\xff\xd8\xff"
+
+
+def test_write_id3_tags_preserves_existing_apic(tmp_path):
+    mp3 = tmp_path / "track.mp3"
+    _make_empty_mp3(mp3)
+    t = ID3(str(mp3))
+    t.add(APIC(encoding=3, mime="image/png", type=3, desc="", data=_FAKE_PNG))
+    t.save(str(mp3))
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value = _mock_streaming_get([_FAKE_JPEG])
+        _write_id3_tags(mp3, {
+            "track_title": "Sample Track",
+            "artist": "Sample Artist",
+            "album": "Sample Album",
+            "cover_url": "https://i.scdn.co/image/x",
+        })
+        mock_get.assert_not_called()
+    reloaded = ID3(str(mp3)).getall("APIC")
+    assert len(reloaded) == 1
+    assert reloaded[0].data == _FAKE_PNG
+
+
+def test_write_id3_tags_no_cover_url_no_apic(tmp_path):
+    mp3 = tmp_path / "track.mp3"
+    _make_empty_mp3(mp3)
+    _write_id3_tags(mp3, {
+        "track_title": "Sample Track",
+        "artist": "Sample Artist",
+        "album": "Sample Album",
+    })
+    assert ID3(str(mp3)).getall("APIC") == []
+
+
+def test_write_id3_tags_album_fallback_to_title(tmp_path):
+    mp3 = tmp_path / "track.mp3"
+    _make_empty_mp3(mp3)
+    _write_id3_tags(mp3, {
+        "track_title": "Sample Track",
+        "artist": "Sample Artist",
+        "album": "",
+    })
+    assert str(ID3(str(mp3))["TALB"].text[0]) == "Sample Track"
+
+
+def test_write_id3_tags_talb_never_empty(tmp_path):
+    mp3 = tmp_path / "track.mp3"
+    _make_empty_mp3(mp3)
+    _write_id3_tags(mp3, {
+        "track_title": "Sample Track",
+        "artist": "Sample Artist",
+        "album": "Sample Album",
+    })
+    talb = str(ID3(str(mp3))["TALB"].text[0])
+    assert talb == "Sample Album"
+    assert talb != ""
+
+
+def test_write_id3_tags_cover_download_failure_no_raise(tmp_path):
+    mp3 = tmp_path / "track.mp3"
+    _make_empty_mp3(mp3)
+    with patch("tunebridge.requests.get", side_effect=RuntimeError("network down")):
+        _write_id3_tags(mp3, {
+            "track_title": "Sample Track",
+            "artist": "Sample Artist",
+            "album": "Sample Album",
+            "cover_url": "https://i.scdn.co/image/x",
+        })
+    tags = ID3(str(mp3))
+    assert str(tags["TIT2"].text[0]) == "Sample Track"
+    assert tags.getall("APIC") == []
+
+
+def test_fetch_cover_bytes_uses_timeout():
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value = _mock_streaming_get([_FAKE_JPEG])
+        _fetch_cover_bytes("https://i.scdn.co/image/x")
+    assert mock_get.call_args.kwargs.get("timeout") == 5
+    assert mock_get.call_args.kwargs.get("stream") is True
+
+
+def test_write_id3_tags_non_200_cover_no_apic(tmp_path):
+    mp3 = tmp_path / "track.mp3"
+    _make_empty_mp3(mp3)
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value = _mock_streaming_get([_FAKE_JPEG], ok=False)
+        _write_id3_tags(mp3, {
+            "track_title": "Sample Track",
+            "artist": "Sample Artist",
+            "album": "Sample Album",
+            "cover_url": "https://i.scdn.co/image/x",
+        })
+    tags = ID3(str(mp3))
+    assert tags.getall("APIC") == []
+    assert str(tags["TIT2"].text[0]) == "Sample Track"
+    assert str(tags["TPE1"].text[0]) == "Sample Artist"
+    assert str(tags["TALB"].text[0]) == "Sample Album"
