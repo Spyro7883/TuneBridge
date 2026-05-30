@@ -396,3 +396,72 @@ def test_fetch_metadata_for_row_routes_local_file():
     yt_extractor.assert_not_called()
     assert not spotify_client.method_calls
     assert not yt_extractor.method_calls
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — Cover Art & Album Metadata (ART-02, ART-03)
+# RED-gate: cover_url / album keys not yet returned → assertion failures
+# ---------------------------------------------------------------------------
+
+_SPOTIFY_TRACK_HTML_WITH_COVER = (
+    '<meta property="og:title" content="Sample Track">'
+    '<meta property="og:description" content="Sample Artist &middot; Sample Album &middot; Song &middot; 2020">'
+    '<meta property="og:image" content="https://i.scdn.co/image/samplehash">'
+    '<script type="application/ld+json">'
+    '{"@context":"https://schema.org","@type":"MusicRecording",'
+    '"name":"Sample Track","byArtist":{"name":"Sample Artist"},'
+    '"inAlbum":{"@type":"MusicAlbum","name":"Sample Album"}}'
+    '</script>'
+)
+_SPOTIFY_TRACK_HTML_NO_JSONLD_ALBUM = (
+    '<meta property="og:title" content="Sample Track">'
+    '<meta property="og:description" content="Sample Artist &middot; Song &middot; 2020">'
+    '<meta property="og:image" content="https://i.scdn.co/image/samplehash">'
+    '<script type="application/ld+json">'
+    '{"@context":"https://schema.org","@type":"MusicRecording","name":"Sample Track"}'
+    '</script>'
+)
+_YT_INFO_WITH_THUMBNAIL = {
+    "title": "Sample Artist - Sample Track",
+    "channel": "SampleVEVO",
+    "uploader": "SampleVEVO",
+    "duration": 200,
+    "id": "dummyid123",
+    "thumbnail": "https://i.ytimg.com/vi/dummyid123/maxresdefault.jpg",
+}
+
+
+def test_spotify_get_metadata_track_returns_cover_url():
+    client = SpotifyClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.text = _SPOTIFY_TRACK_HTML_WITH_COVER
+        result = client.get_metadata("https://open.spotify.com/track/x", "track")
+    assert result["cover_url"] == "https://i.scdn.co/image/samplehash"
+
+
+def test_spotify_get_metadata_track_album_from_jsonld():
+    client = SpotifyClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.text = _SPOTIFY_TRACK_HTML_WITH_COVER
+        result = client.get_metadata("https://open.spotify.com/track/x", "track")
+    assert result["album"] == "Sample Album"
+
+
+def test_spotify_get_metadata_track_no_jsonld_album_empty():
+    client = SpotifyClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.text = _SPOTIFY_TRACK_HTML_NO_JSONLD_ALBUM
+        result = client.get_metadata("https://open.spotify.com/track/x", "track")
+    assert result["album"] == ""
+
+
+def test_youtube_extract_returns_cover_url():
+    extractor = YoutubeExtractor()
+    with patch("tunebridge.yt_dlp.YoutubeDL") as MockYDL:
+        inst = MockYDL.return_value.__enter__.return_value
+        inst.extract_info.return_value = _YT_INFO_WITH_THUMBNAIL
+        result = extractor.extract_metadata("https://www.youtube.com/watch?v=dummyid123")
+    assert result["cover_url"] == "https://i.ytimg.com/vi/dummyid123/maxresdefault.jpg"
