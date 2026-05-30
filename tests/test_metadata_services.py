@@ -465,3 +465,30 @@ def test_youtube_extract_returns_cover_url():
         inst.extract_info.return_value = _YT_INFO_WITH_THUMBNAIL
         result = extractor.extract_metadata("https://www.youtube.com/watch?v=dummyid123")
     assert result["cover_url"] == "https://i.ytimg.com/vi/dummyid123/maxresdefault.jpg"
+
+
+_SPOTIFY_TRACK_HTML_MULTI_JSONLD = (
+    '<meta property="og:title" content="Sample Track">'
+    '<meta property="og:description" content="Sample Artist &middot; Sample Album &middot; Song &middot; 2020">'
+    '<meta property="og:image" content="https://i.scdn.co/image/samplehash">'
+    # First MusicRecording block has NO inAlbum — must not short-circuit the scan
+    '<script type="application/ld+json">'
+    '{"@context":"https://schema.org","@type":"MusicRecording","name":"Sample Track"}'
+    '</script>'
+    # Second MusicRecording block carries the album — must still be reached
+    '<script type="application/ld+json">'
+    '{"@context":"https://schema.org","@type":"MusicRecording","name":"Sample Track",'
+    '"inAlbum":{"@type":"MusicAlbum","name":"Sample Album"}}'
+    '</script>'
+)
+
+
+def test_spotify_get_metadata_album_from_later_jsonld_block():
+    # WR-01: break must fire only once the album is found, so a leading
+    # MusicRecording block without inAlbum does not hide a later one that has it.
+    client = SpotifyClient()
+    with patch("tunebridge.requests.get") as mock_get:
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_get.return_value.text = _SPOTIFY_TRACK_HTML_MULTI_JSONLD
+        result = client.get_metadata("https://open.spotify.com/track/x", "track")
+    assert result["album"] == "Sample Album"

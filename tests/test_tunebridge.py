@@ -407,6 +407,15 @@ def test_fetch_cover_bytes_uses_timeout():
     assert mock_get.call_args.kwargs.get("stream") is True
 
 
+def test_fetch_cover_bytes_rejects_non_http_scheme():
+    # WR-03: file://, data:, and relative URLs from a broken scrape must never
+    # reach requests.get — return None without any network/file access.
+    for bad in ("file:///etc/passwd", "data:image/png;base64,AAAA", "/relative/path"):
+        with patch("tunebridge.requests.get") as mock_get:
+            assert _fetch_cover_bytes(bad) is None
+            mock_get.assert_not_called()
+
+
 def test_write_id3_tags_non_200_cover_no_apic(tmp_path):
     mp3 = tmp_path / "track.mp3"
     _make_empty_mp3(mp3)

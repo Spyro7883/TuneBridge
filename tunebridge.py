@@ -203,6 +203,8 @@ def _fetch_cover_bytes(url: str) -> bytes | None:
     Returns bytes on success, None on any failure. Uses stream=True so an
     oversized body is never fully buffered before rejection (D-02/D-03).
     """
+    if not url.startswith(("https://", "http://")):
+        return None  # reject file://, data:, relative paths from a broken scrape
     try:
         with requests.get(url, timeout=5, stream=True) as resp:
             if not resp.ok:
@@ -942,7 +944,7 @@ class SpotifyClient:
                     in_album = ld.get("inAlbum")
                     if isinstance(in_album, dict):
                         album = in_album.get("name", "") or ""
-                    break
+                        break  # stop only once the album is found (WR-01)
             except (json.JSONDecodeError, AttributeError, TypeError):
                 continue
 
