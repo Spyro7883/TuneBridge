@@ -192,10 +192,46 @@ def _sanitise_filename(s: str) -> str:
     return s[:80]
 
 
+_MAX_COVER_BYTES = 5 * 1024 * 1024  # 5 MB cap (D-03)
+_JPEG_MAGIC = b"\xff\xd8\xff"       # D-04
+_PNG_MAGIC  = b"\x89PNG\r\n\x1a\n"  # D-04
+
+
+def _fetch_cover_bytes(url: str) -> bytes | None:
+    """Download cover image bytes with bounded timeout and size cap (ART-04/ART-05).
+
+    Returns bytes on success, None on any failure. Uses stream=True so an
+    oversized body is never fully buffered before rejection (D-02/D-03).
+    """
+    try:
+        with requests.get(url, timeout=5, stream=True) as resp:
+            if not resp.ok:
+                return None
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in resp.iter_content(chunk_size=65536):
+                total += len(chunk)
+                if total > _MAX_COVER_BYTES:
+                    return None
+                chunks.append(chunk)
+        return b"".join(chunks)
+    except Exception:
+        return None
+
+
+def _sniff_mime(data: bytes) -> str | None:
+    """Return JPEG or PNG mime string based on magic bytes, None if unrecognised (D-04)."""
+    if data[:3] == _JPEG_MAGIC:
+        return "image/jpeg"
+    if data[:8] == _PNG_MAGIC:
+        return "image/png"
+    return None
+
+
 def _write_id3_tags(file_path: "Path", meta: dict) -> None:
     """Write ID3 title/artist/album tags to an MP3 using mutagen."""
     try:
-        from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, APIC, ID3NoHeaderError
         try:
             tags = ID3(str(file_path))
         except ID3NoHeaderError:
@@ -203,12 +239,22 @@ def _write_id3_tags(file_path: "Path", meta: dict) -> None:
         title  = str(meta.get("track_title", "") or meta.get("title", "") or "")
         artist = str(meta.get("artist", "") or "")
         album  = str(meta.get("album", "") or "")
+        if not album:
+            album = title  # ART-03: TALB never blank — fall back to track title
         if title:
             tags["TIT2"] = TIT2(encoding=3, text=title)
         if artist:
             tags["TPE1"] = TPE1(encoding=3, text=artist)
         if album:
             tags["TALB"] = TALB(encoding=3, text=album)
+        # ART-01: embed cover only when no art exists
+        cover_url = meta.get("cover_url") or ""
+        if cover_url and not tags.getall("APIC"):
+            cover_bytes = _fetch_cover_bytes(cover_url)
+            if cover_bytes:
+                mime = _sniff_mime(cover_bytes)
+                if mime:
+                    tags.add(APIC(encoding=3, mime=mime, type=3, desc="", data=cover_bytes))
         tags.save(str(file_path))
     except Exception as exc:
         logging.getLogger(__name__).warning("ID3 tag write failed for %s: %s", file_path.name, exc)
