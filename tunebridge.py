@@ -997,6 +997,10 @@ class YoutubeExtractor:
             result["track_title"] = track_part
         else:
             result["track_title"] = raw_title
+            # No 'Artist - Title' separator: fall back to the channel/uploader
+            # name so iBroadcast shows it instead of "Unknown Artist".
+            if result["channel"]:
+                result["artist"] = result["channel"]
         result["cover_url"] = info.get("thumbnail") or ""
         return result
 
