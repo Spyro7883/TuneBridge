@@ -1595,10 +1595,13 @@ class TuneBridgeApp(QMainWindow):
             self._card_valid.set_count(0),
             self._card_invalid.set_count(0),
         )
-        # Wire row deletion to decrement stat cards
+        # Wire row deletion to decrement stat cards AND re-evaluate the Start
+        # button — otherwise deleting a completed row leaves Start stuck disabled
+        # while the remaining rows are all METADATA_READY (UI-01).
         self.table._on_rows_removed = lambda v, i: (
             self._card_valid.set_count(max(0, self._card_valid.count() - v)),
             self._card_invalid.set_count(max(0, self._card_invalid.count() - i)),
+            self._refresh_start_button(),
         )
         # Wire metadata failure to move row from valid → invalid
         self.table._on_row_failed = lambda: (
