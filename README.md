@@ -12,8 +12,9 @@ A desktop app that takes Spotify or YouTube track URLs — or local audio files 
 
 - **Flexible input** — paste Spotify URLs or YouTube URLs (mixed batches supported), or add local audio files via **Add Files**
 - **Local file upload** — pull in MP3/FLAC/WAV files from disk; metadata is read from embedded tags (with filename fallback) and the same retune/organize/upload pipeline applies
-- **Spotify metadata** — scrapes track title, artist, album, and duration from the public Spotify page (no API key required)
+- **Spotify metadata** — scrapes track title, artist, album, duration, and cover art from the public Spotify page (no API key required)
 - **YouTube audio matching** — searches YouTube via yt-dlp and picks the best audio-only match using duration and title scoring
+- **Cover art & album tags** — embeds cover artwork (APIC) and album metadata into the ID3 tags so iBroadcast shows the right album and artwork; album falls back gracefully when the source has none
 - **Batch downloads** — parallel downloads with dynamic thread count based on queue size
 - **440 Hz / 432 Hz** — optional pitch retune per batch before saving
 - **Folder confirmation** — per-song folder dialog with last-used folder suggestion; app never creates or renames folders
