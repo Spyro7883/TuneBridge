@@ -172,6 +172,7 @@ def test_saved_paths_populated_after_move(window, tmp_path):
         with patch("tunebridge.shutil.move"), patch("tunebridge.os.replace"):
             window._show_folder_dialog(4)
     assert isinstance(window._saved_paths.get(4), Path)
+    assert isinstance(window._upload_paths.get(4), Path)
 
 
 def test_oserror_emits_failed_save(window, tmp_path):

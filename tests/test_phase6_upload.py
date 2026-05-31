@@ -143,7 +143,7 @@ def test_ibroadcast_add_to_playlist_failure():
 
 def test_start_upload_batch_empty_guard():
     app = MagicMock()
-    app._saved_paths = {}
+    app._upload_paths = {}
     TuneBridgeApp._start_upload_batch(app)
     app._unlock_ui.assert_called_once()
 
@@ -152,7 +152,7 @@ def test_start_upload_batch_missing_credentials(monkeypatch):
     monkeypatch.delenv("IBROADCAST_USERNAME", raising=False)
     monkeypatch.delenv("IBROADCAST_PASSWORD", raising=False)
     app = MagicMock()
-    app._saved_paths = {1: Path("song.mp3")}
+    app._upload_paths = {1: Path("song.mp3")}
     TuneBridgeApp._start_upload_batch(app)
     app._dispatcher.row_status_changed.emit.assert_called_with(1, "Done")
     app._unlock_ui.assert_called_once()
@@ -162,7 +162,7 @@ def test_start_upload_batch_auth_failure(monkeypatch):
     monkeypatch.setenv("IBROADCAST_USERNAME", "user@test.com")
     monkeypatch.setenv("IBROADCAST_PASSWORD", "wrong")
     app = MagicMock()
-    app._saved_paths = {1: Path("song.mp3")}
+    app._upload_paths = {1: Path("song.mp3")}
     with patch("tunebridge._ibroadcast_login", return_value=(None, None, {}, {})):
         TuneBridgeApp._start_upload_batch(app)
     app._dispatcher.row_status_changed.emit.assert_called_with(1, "Failed — upload")
@@ -177,7 +177,7 @@ def test_upload_worker_duplicate_skips_upload():
     app = MagicMock()
     app._closing.is_set.return_value = False
     app._row_metadata = {1: {"title": "Song", "artist": "Band"}}
-    app._saved_paths = {1: Path("song.mp3")}
+    app._upload_paths = {1: Path("song.mp3")}
     with patch("tunebridge._is_duplicate", return_value=True), \
          patch("tunebridge._ibroadcast_upload") as mock_upload:
         TuneBridgeApp._upload_worker(app, 1, "token", 42, {})
@@ -190,7 +190,7 @@ def test_upload_worker_success():
     app._closing.is_set.return_value = False
     app._upload_playlist_id = None
     app._row_metadata = {1: {"title": "Song", "artist": "Band"}}
-    app._saved_paths = {1: Path("song.mp3")}
+    app._upload_paths = {1: Path("song.mp3")}
     with patch("tunebridge._is_duplicate", return_value=False), \
          patch("tunebridge._ibroadcast_upload", return_value=(True, 9999)):
         TuneBridgeApp._upload_worker(app, 1, "token", 42, {})
@@ -202,7 +202,7 @@ def test_upload_worker_failure():
     app._closing.is_set.return_value = False
     app._upload_playlist_id = None
     app._row_metadata = {1: {"title": "Song", "artist": "Band"}}
-    app._saved_paths = {1: Path("song.mp3")}
+    app._upload_paths = {1: Path("song.mp3")}
     with patch("tunebridge._is_duplicate", return_value=False), \
          patch("tunebridge._ibroadcast_upload", return_value=(False, None)):
         TuneBridgeApp._upload_worker(app, 1, "token", 42, {})
