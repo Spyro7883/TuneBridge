@@ -157,6 +157,48 @@ QPushButton#start_btn:disabled {
 """
 
 # ---------------------------------------------------------------------------
+# Settings persistence layer (Phase 9, PLST-03)
+# ---------------------------------------------------------------------------
+
+SETTINGS_PATH = Path.home() / ".tunebridge" / "settings.json"
+DEFAULT_SETTINGS = {
+    "local_save": False,
+    "playlist_preference": "ask",
+    "playlist_preference_name": "",
+}
+
+
+def load_settings() -> dict:
+    """Read settings.json defensively. Never raises; always returns a complete dict.
+
+    Missing/corrupt/non-dict file → defaults. Partial dict → missing keys filled
+    from DEFAULT_SETTINGS. (Pitfall 7)
+    """
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return dict(DEFAULT_SETTINGS)
+    if not isinstance(data, dict):
+        return dict(DEFAULT_SETTINGS)
+    return {**DEFAULT_SETTINGS, **data}
+
+
+def save_settings(settings: dict) -> None:
+    """Atomically persist settings to settings.json. (Pitfall 8, Pitfall 14)
+
+    Creates ~/.tunebridge/ if absent. Writes to a .tmp sibling then os.replace
+    (atomic same-volume rename). On OSError: clean the tmp, do NOT raise.
+    """
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SETTINGS_PATH.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        os.replace(tmp, SETTINGS_PATH)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
 # Download infrastructure (Phase 4)
 # ---------------------------------------------------------------------------
 
