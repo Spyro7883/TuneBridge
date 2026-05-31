@@ -1719,6 +1719,7 @@ class TuneBridgeApp(QMainWindow):
         self._folder_events:  dict[int, threading.Event]     = {}
         self._folder_results: dict[int, Path | None]         = {}
         self._saved_paths:    dict[int, Path]                = {}
+        self._upload_paths:   dict[int, Path]                = {}
         self._folder_total   = 0
         self._folder_done    = 0
         self._folder_skipped = 0
@@ -2087,6 +2088,7 @@ class TuneBridgeApp(QMainWindow):
                 _write_id3_tags(dest_candidate, meta)
                 final = dest_candidate
                 self._saved_paths[row_id] = final
+                self._upload_paths[row_id] = final
                 if not self._closing.is_set():
                     self._dispatcher.row_status_changed.emit(row_id, SongStatus.UPLOADING.value)
                 self._on_folder_row_finished(row_id, SongStatus.UPLOADING.value)
