@@ -10,8 +10,15 @@ import json
 from pathlib import Path
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
 import tunebridge
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    app = QApplication.instance() or QApplication([])
+    return app
 
 
 def test_load_missing_returns_defaults(tmp_path, monkeypatch):
@@ -112,3 +119,34 @@ def test_save_atomic_failure_preserves(tmp_path, monkeypatch):
 
     # No *.tmp orphan must remain
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_chk_save_persists(tmp_path, monkeypatch, qapp):
+    """SAVE-01: toggling _chk_save writes local_save to settings; a fresh app reads it back."""
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(tunebridge, "SETTINGS_PATH", settings_path)
+    # Start from a clean settings file (default OFF)
+    tunebridge.save_settings({
+        "local_save": False,
+        "playlist_preference": "ask",
+        "playlist_preference_name": "",
+    })
+
+    from tunebridge import TuneBridgeApp
+    w1 = TuneBridgeApp()
+    try:
+        assert w1._chk_save.isChecked() is False          # default OFF read from settings
+        w1._chk_save.setChecked(True)                      # user toggles ON → stateChanged → save_settings
+        # Persisted to disk
+        assert tunebridge.load_settings()["local_save"] is True
+    finally:
+        w1.close()
+        w1.deleteLater()
+
+    # A fresh app instance restores the persisted ON state
+    w2 = TuneBridgeApp()
+    try:
+        assert w2._chk_save.isChecked() is True
+    finally:
+        w2.close()
+        w2.deleteLater()
