@@ -2138,12 +2138,12 @@ class TuneBridgeApp(QMainWindow):
         """Slot connected to folder_batch_done. Authenticates once, submits upload workers. (D-04/D-09/D-13)
 
         Guard order:
-        1. Empty _saved_paths → unlock immediately (D-13)
+        1. Empty _upload_paths → unlock immediately (D-13)
         2. Missing credentials → emit Done for all rows, unlock (D-02)
         3. Auth failure → emit FAILED_UPLOAD for all rows, unlock (D-03)
         4. Normal path → set _upload_total, submit _upload_worker per row (D-10)
         """
-        uploading_rows = list(self._saved_paths.keys())
+        uploading_rows = list(self._upload_paths.keys())
 
         # D-13: empty batch guard — all rows were skipped or failed before saving
         if not uploading_rows:
@@ -2217,9 +2217,9 @@ class TuneBridgeApp(QMainWindow):
             # Spotify URL — the primary documented input format.
             title     = meta.get("track_title", "") or meta.get("title", "")
             artist    = meta.get("artist", "")
-            # WR-03: defensive read — _saved_paths can be cleared between
+            # WR-03: defensive read — _upload_paths can be cleared between
             # batches; if our row was already wiped, abort this upload silently.
-            file_path = self._saved_paths.get(row_id)
+            file_path = self._upload_paths.get(row_id)
             if file_path is None:
                 return
 
@@ -2503,9 +2503,10 @@ class TuneBridgeApp(QMainWindow):
             )
             return   # nothing to do — guard against empty batch
 
-        # Reset per-batch state — prevents stale _saved_paths from previous batches
-        # being re-uploaded if user deleted rows and started a new batch.
+        # Reset per-batch state — prevents stale _saved_paths / _upload_paths entries
+        # from previous batches being re-uploaded if user deleted rows and started a new batch.
         self._saved_paths.clear()
+        self._upload_paths.clear()
 
         # Lock UI — no edits during active batch run (D-03)
         self._paste_box.setReadOnly(True)
