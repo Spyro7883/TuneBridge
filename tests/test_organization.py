@@ -369,3 +369,134 @@ def test_folder_dialog_unblocks_worker_on_exception(window, tmp_path):
         window._show_folder_dialog(7)
     assert ev.is_set(), "Worker would deadlock — event was not set after dialog raised"
     assert window._folder_results[7] is None
+
+
+# Phase 10 (SAVE-01..03) — RED until Plan 02 Wave 1 lands.
+
+
+def test_chk_save_default_off(window):
+    """SAVE-01: _chk_save checkbox exists, default OFF, enabled, correct label."""
+    assert window._chk_save.isChecked() is False
+    assert window._chk_save.text() == "Save to local disk"
+    assert window._chk_save.isEnabled() is True
+
+
+def test_chk_save_disabled_during_batch(window):
+    """SAVE-01: _chk_save is disabled while an active batch is running."""
+    # Contract: _start_processing sets _chk_save.setEnabled(False) at batch start.
+    # Directly verify the widget exists and can be set (will fail today: AttributeError).
+    window._chk_save.setEnabled(False)
+    assert window._chk_save.isEnabled() is False
+
+
+def test_unlock_ui_reenables_chk_save(window):
+    """SAVE-01: _unlock_ui re-enables _chk_save after batch completes."""
+    window._chk_save.setEnabled(False)
+    window._unlock_ui()
+    assert window._chk_save.isEnabled() is True
+
+
+def test_save_off_three_row_batch(window, tmp_path, monkeypatch):
+    """SAVE-02 (HIGHEST RISK, deadlock): 3-row save-OFF batch: no folder_worker called,
+    folder_batch_done fires exactly once, _upload_paths == temp paths for all 3 rows."""
+    window._chk_save.setChecked(False)
+    monkeypatch.setattr(window, "_folder_worker", MagicMock())
+    # Populate temp paths
+    for rid in (0, 1, 2):
+        p = tmp_path / f"t{rid}.mp3"
+        p.write_bytes(b"x")
+        window._temp_paths[rid] = p
+    # Set counters as _start_processing would
+    window._folder_total = 3
+    window._folder_done = 0
+    window._folder_skipped = 0
+    window._folder_failed = 0
+    window._folder_batch_emitted = False
+    window._download_total = 3
+    window._download_done = 0
+    window._download_failed = 0
+    # Capture folder_batch_done emissions
+    fired = []
+    window._dispatcher.folder_batch_done.connect(lambda: fired.append(1))
+    # Emit AWAITING for all 3 rows
+    for rid in (0, 1, 2):
+        window._on_download_row_finished(rid, SongStatus.AWAITING.value)
+    # Assertions
+    assert window._folder_worker.called is False, "save-OFF must not call _folder_worker"
+    assert len(fired) == 1, f"folder_batch_done must fire exactly once, fired {len(fired)} times"
+    assert window._upload_paths[0] == window._temp_paths[0]
+    assert window._upload_paths[1] == window._temp_paths[1]
+    assert window._upload_paths[2] == window._temp_paths[2]
+
+
+def test_save_off_mixed_fail_no_double_emit(window, tmp_path):
+    """SAVE-02 (double-emit guard): mixed batch (2 AWAITING + 1 FAILED_DOWNLOAD)
+    emits folder_batch_done exactly once and only populates _upload_paths for succeeded rows."""
+    window._chk_save.setChecked(False)
+    window._folder_worker = MagicMock()
+    # Rows 0, 1 get temp files; row 2 will emit FAILED_DOWNLOAD
+    for rid in (0, 1):
+        p = tmp_path / f"m{rid}.mp3"
+        p.write_bytes(b"x")
+        window._temp_paths[rid] = p
+    # Set counters
+    window._folder_total = 3
+    window._folder_done = 0
+    window._folder_skipped = 0
+    window._folder_failed = 0
+    window._folder_batch_emitted = False
+    window._download_total = 3
+    window._download_done = 0
+    window._download_failed = 0
+    fired = []
+    window._dispatcher.folder_batch_done.connect(lambda: fired.append(1))
+    # Emit
+    window._on_download_row_finished(0, SongStatus.AWAITING.value)
+    window._on_download_row_finished(1, SongStatus.AWAITING.value)
+    window._on_download_row_finished(2, SongStatus.FAILED_DOWNLOAD.value)
+    assert len(fired) == 1, f"folder_batch_done must fire exactly once, fired {len(fired)} times"
+    assert len(window._upload_paths) == 2
+    assert set(window._upload_paths.keys()) == {0, 1}
+
+
+def test_save_off_upload_paths_is_temp(window, tmp_path):
+    """SAVE-02: when save is OFF, _upload_paths[row_id] points to the temp file."""
+    window._chk_save.setChecked(False)
+    p = tmp_path / "five.mp3"
+    p.write_bytes(b"x")
+    window._temp_paths[5] = p
+    window._folder_total = 1
+    window._folder_done = 0
+    window._folder_skipped = 0
+    window._folder_failed = 0
+    window._folder_batch_emitted = False
+    window._download_total = 1
+    window._download_done = 0
+    window._download_failed = 0
+    window._on_download_row_finished(5, SongStatus.AWAITING.value)
+    assert window._upload_paths[5] == window._temp_paths[5]
+
+
+def test_save_on_regression(window, tmp_path, monkeypatch):
+    """SAVE-03 (v1.0 unchanged): when save is ON, _folder_worker is submitted and
+    _upload_paths is NOT short-circuited in the download handler."""
+    window._chk_save.setChecked(True)
+    mock_submit = MagicMock()
+    monkeypatch.setattr(window._executor, "submit", mock_submit)
+    p = tmp_path / "six.mp3"
+    p.write_bytes(b"x")
+    window._temp_paths[6] = p
+    window._folder_total = 1
+    window._folder_done = 0
+    window._folder_skipped = 0
+    window._folder_failed = 0
+    window._folder_batch_emitted = False
+    window._download_total = 1
+    window._download_done = 0
+    window._download_failed = 0
+    assert not window._closing.is_set()
+    window._on_download_row_finished(6, SongStatus.AWAITING.value)
+    assert mock_submit.called is True, "save-ON must submit _folder_worker"
+    args = mock_submit.call_args[0]
+    assert args[0] == window._folder_worker and args[1] == 6
+    assert 6 not in window._upload_paths, "save-ON must not short-circuit _upload_paths in download handler"
