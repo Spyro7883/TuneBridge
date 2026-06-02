@@ -36,6 +36,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -1661,6 +1662,9 @@ class TuneBridgeApp(QMainWindow):
             self._card_invalid.set_count(self._card_invalid.count() + 1),
         )
 
+        # Phase 9/10: load persisted settings before any settings-bound widget is built
+        self._settings = load_settings()
+
         # Toolbar row: Hz segmented control + Start button (D-04, D-05, D-06)
         toolbar_row = QHBoxLayout()
         toolbar_row.setSpacing(8)
@@ -1684,6 +1688,16 @@ class TuneBridgeApp(QMainWindow):
         self._btn_add_files.setObjectName("add_files_btn")
         self._btn_add_files.clicked.connect(self._on_add_files_clicked)
         toolbar_row.addWidget(self._btn_add_files)
+
+        # Phase 10: local-save toggle (SAVE-01), default OFF, persisted via settings
+        self._chk_save = QCheckBox("Save to local disk")
+        self._chk_save.setToolTip(
+            "OFF: upload to iBroadcast only — no local copy kept.\n"
+            "ON: show folder dialog per song and save a local copy."
+        )
+        self._chk_save.setChecked(bool(self._settings.get("local_save", False)))
+        self._chk_save.stateChanged.connect(self._on_save_toggled)
+        toolbar_row.addWidget(self._chk_save)
 
         toolbar_row.addStretch()
 
@@ -1818,6 +1832,11 @@ class TuneBridgeApp(QMainWindow):
         )
         if paths:
             self._process_local_files(paths)
+
+    def _on_save_toggled(self, state: int) -> None:
+        """Persist the local-save toggle to settings (Phase 9 layer). SAVE-01."""
+        self._settings["local_save"] = bool(self._chk_save.isChecked())
+        save_settings(self._settings)
 
     def _process_local_files(self, paths: list[str]) -> None:
         """Inject local audio files as 'Local File' rows (mirrors _process_urls, D-09)."""

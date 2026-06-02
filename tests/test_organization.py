@@ -29,7 +29,9 @@ def qapp():
 
 
 @pytest.fixture
-def window(qapp):
+def window(qapp, tmp_path, monkeypatch):
+    # Isolate settings so tests never read/write the real ~/.tunebridge/settings.json
+    monkeypatch.setattr("tunebridge.SETTINGS_PATH", tmp_path / "settings.json")
     w = TuneBridgeApp()
     yield w
     w.close()
