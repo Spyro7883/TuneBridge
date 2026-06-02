@@ -2292,7 +2292,8 @@ class TuneBridgeApp(QMainWindow):
 
         finished = self._upload_done + self._upload_existed + self._upload_failed
         if finished < self._upload_total:
-            self.statusBar().showMessage(
+            # Pitfall 12: called from worker thread — marshal to main thread via signal.
+            self._dispatcher.status_message.emit(
                 f"Uploading {finished} of {self._upload_total}…"
             )
             return
@@ -2312,7 +2313,7 @@ class TuneBridgeApp(QMainWindow):
                 playlist_name = str(pdata[0]) if pdata else "playlist"
             else:
                 playlist_name = str(pdata.get("name", "playlist")) if isinstance(pdata, dict) else "playlist"
-            self.statusBar().showMessage(
+            self._dispatcher.status_message.emit(
                 f"{base_msg} — waiting for iBroadcast to process, then adding to '{playlist_name}'…"
             )
             # iBroadcast upload API returns no track_id — tracks appear after async processing.
@@ -2320,7 +2321,7 @@ class TuneBridgeApp(QMainWindow):
             self._playlist_pending = True
             self._dispatcher.start_playlist_poll.emit()
         else:
-            self.statusBar().showMessage(base_msg)
+            self._dispatcher.status_message.emit(base_msg)
 
     def _on_start_playlist_poll(self) -> None:
         """Main-thread slot: start QTimer for delayed playlist update (safe from main thread)."""
@@ -2489,6 +2490,7 @@ class TuneBridgeApp(QMainWindow):
         self._btn_440.setEnabled(True)
         self._btn_432.setEnabled(True)
         self._btn_add_files.setEnabled(True)
+        self._chk_save.setEnabled(True)
         self._paste_box.setFocus()
 
     def _refresh_start_button(self, _row_id: int = 0, _status: str = "") -> None:
@@ -2546,6 +2548,7 @@ class TuneBridgeApp(QMainWindow):
         self._btn_440.setEnabled(False)
         self._btn_432.setEnabled(False)
         self._btn_add_files.setEnabled(False)
+        self._chk_save.setEnabled(False)   # D-07: locked for batch duration
 
         # W-09: if setup raises (e.g. _executor.submit hits a shutdown executor
         # from a parallel closeEvent), unwind UI lock so the user isn't trapped.

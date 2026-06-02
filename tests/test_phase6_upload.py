@@ -227,6 +227,7 @@ def test_on_upload_row_finished_batch_counter():
     TuneBridgeApp._on_upload_row_finished(app, 2, "Already uploaded")
     assert app._upload_existed == 1
     app._dispatcher.upload_batch_done.emit.assert_called_once()
-    msg = app.statusBar().showMessage.call_args[0][0]
+    # Pitfall 12: final summary routes through status_message signal, not statusBar() directly.
+    msg = app._dispatcher.status_message.emit.call_args[0][0]
     assert "1 uploaded" in msg
     assert "1 already existed" in msg
