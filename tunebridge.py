@@ -1738,6 +1738,7 @@ class TuneBridgeApp(QMainWindow):
         self._folder_done    = 0
         self._folder_skipped = 0
         self._folder_failed  = 0
+        self._folder_batch_emitted = False   # Pitfall 4: guard against double folder_batch_done
 
         # Phase 6: upload batch tracking (D-04, D-11, D-12)
         self._upload_total    = 0
@@ -2146,12 +2147,14 @@ class TuneBridgeApp(QMainWindow):
         if finished < self._folder_total:
             return
 
-        # All folder dialogs resolved (D-08, D-11)
-        self._dispatcher.folder_batch_done.emit()
-        self.statusBar().showMessage(
-            f"Saved {self._folder_done}, skipped {self._folder_skipped}, "
-            f"failed {self._folder_failed}"
-        )
+        # All folder dialogs resolved (D-08, D-11) — guard against double emit (Pitfall 4)
+        if not self._folder_batch_emitted:
+            self._folder_batch_emitted = True
+            self._dispatcher.folder_batch_done.emit()
+            self.statusBar().showMessage(
+                f"Saved {self._folder_done}, skipped {self._folder_skipped}, "
+                f"failed {self._folder_failed}"
+            )
 
     def _start_upload_batch(self) -> None:
         """Slot connected to folder_batch_done. Authenticates once, submits upload workers. (D-04/D-09/D-13)
@@ -2419,11 +2422,19 @@ class TuneBridgeApp(QMainWindow):
             # which would otherwise crash a second batch in the same session.
             if self._closing.is_set():
                 return
-            try:
-                self._executor.submit(self._folder_worker, _row_id)   # chain into Phase 5 (D-02)
-            except RuntimeError:
-                # Executor already shut down during close — nothing to do.
-                return
+            if self._chk_save.isChecked():          # save ON — v1.0 path unchanged (SAVE-03)
+                try:
+                    self._executor.submit(self._folder_worker, _row_id)   # chain into Phase 5 (D-02)
+                except RuntimeError:
+                    # Executor already shut down during close — nothing to do.
+                    return
+            else:                                   # save OFF — bypass folder stage (SAVE-02)
+                with self._temp_paths_lock:
+                    temp = self._temp_paths.get(_row_id)
+                if temp is not None:
+                    self._upload_paths[_row_id] = temp
+                # Drive the gate counter directly; folder_batch_done fires via the normal path.
+                self._on_folder_row_finished(_row_id, SongStatus.UPLOADING.value)
         else:
             self._download_failed += 1
             # C-05: failed download never produces a folder dialog — shrink
@@ -2442,11 +2453,13 @@ class TuneBridgeApp(QMainWindow):
                 self._folder_done + self._folder_skipped + self._folder_failed
             )
             if self._folder_total > 0 and folder_finished == self._folder_total:
-                self._dispatcher.folder_batch_done.emit()
-                self.statusBar().showMessage(
-                    f"Saved {self._folder_done}, skipped {self._folder_skipped}, "
-                    f"failed {self._folder_failed}"
-                )
+                if not self._folder_batch_emitted:
+                    self._folder_batch_emitted = True
+                    self._dispatcher.folder_batch_done.emit()
+                    self.statusBar().showMessage(
+                        f"Saved {self._folder_done}, skipped {self._folder_skipped}, "
+                        f"failed {self._folder_failed}"
+                    )
         finished = self._download_done + self._download_failed
 
         if finished < self._download_total:
@@ -2548,6 +2561,7 @@ class TuneBridgeApp(QMainWindow):
             self._folder_done      = 0
             self._folder_skipped   = 0
             self._folder_failed    = 0
+            self._folder_batch_emitted = False   # Pitfall 4: fresh guard per batch
 
             # Connect batch-completion tracker (disconnect guard handled in _on_download_row_finished)
             self._dispatcher.row_status_changed.connect(self._on_download_row_finished)
