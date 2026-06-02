@@ -1958,6 +1958,12 @@ class TuneBridgeApp(QMainWindow):
                     pass
                 downloaded = out_path
 
+            # Tag the working temp file here (worker thread — the cover fetch is
+            # network I/O and must not run on the main thread). Doing it now means
+            # BOTH save modes upload correct metadata: save-OFF uploads this temp
+            # file directly, save-ON moves it to the folder (already tagged).
+            _write_id3_tags(downloaded, metadata)
+
             if not self._closing.is_set():
                 self._dispatcher.row_status_changed.emit(row_id, SongStatus.AWAITING.value)
                 with self._temp_paths_lock:

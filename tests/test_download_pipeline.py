@@ -387,3 +387,41 @@ def test_download_worker_local_file_copies(window, tmp_path):
     assert awaiting, f"Expected AWAITING status, got: {emitted}"
     assert window._temp_paths[0].name == "Song Alpha.mp3"
     assert window._temp_paths[0].exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 gap fix: tag the working temp file so save-OFF uploads carry metadata
+# ---------------------------------------------------------------------------
+
+def test_download_worker_tags_temp_file_440(window):
+    """SAVE-02 fix: _download_worker writes ID3 tags to the working temp file so the
+    save-OFF path (which uploads that temp file directly) carries title/artist/album/cover."""
+    metadata = {"track_title": "Song Alpha", "artist": "Artist One",
+                "album": "Album One", "cover_url": "https://example.com/c.jpg",
+                "source": "Spotify"}
+    fake_mp3 = Path("/tmp/tb_test/track.mp3")
+    with patch("tunebridge._find_best_yt_match", return_value="https://music.youtube.com/watch?v=x"), \
+         patch("tunebridge.download_track_for_row", return_value=fake_mp3), \
+         patch("tunebridge._write_id3_tags") as mock_tags, \
+         patch("tunebridge.uuid.uuid4") as mock_uuid:
+        mock_uuid.return_value.hex = "abcdef1234567890"
+        window._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 440)
+    mock_tags.assert_called_once_with(fake_mp3, metadata)
+
+
+def test_download_worker_tags_retuned_file_432(window):
+    """SAVE-02 fix: in 432Hz mode the tags are written to the RETUNED temp file
+    (the one actually uploaded), not the pre-retune download."""
+    metadata = {"track_title": "Song Alpha", "artist": "Artist One", "source": "Spotify"}
+    fake_mp3 = Path("/tmp/tb_test/track.mp3")
+    with patch("tunebridge._find_best_yt_match", return_value="https://music.youtube.com/watch?v=x"), \
+         patch("tunebridge.download_track_for_row", return_value=fake_mp3), \
+         patch("tunebridge.retune_file"), \
+         patch("tunebridge.Path.unlink"), \
+         patch("tunebridge._write_id3_tags") as mock_tags, \
+         patch("tunebridge.uuid.uuid4") as mock_uuid:
+        mock_uuid.return_value.hex = "abcdef1234567890"
+        window._download_worker(0, "https://open.spotify.com/track/abc", "Spotify", metadata, 432)
+    mock_tags.assert_called_once()
+    tagged_path = mock_tags.call_args[0][0]
+    assert tagged_path.name.endswith("_432hz.mp3"), f"Tags must be on the retuned file, got: {tagged_path}"
