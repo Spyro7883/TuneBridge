@@ -1573,6 +1573,7 @@ class SettingsDialog(QDialog):
         self._dispatcher = dispatcher
         self._settings = settings          # live dict reference from caller
         self._fetch_failed = False
+        self._torn_down = False            # CR-02: idempotent teardown guard
         self._dedicated_executor = ThreadPoolExecutor(max_workers=1)
 
         layout = QVBoxLayout(self)
@@ -1648,6 +1649,7 @@ class SettingsDialog(QDialog):
         """Main-thread slot: populate list or show error page."""
         if self._fetch_failed:
             self._stack.setCurrentIndex(self._PAGE_ERROR)
+            self._btn_save.setEnabled(False)   # WR-03: no Save on error page
             return
         self._list.clear()
         ask_item = QListWidgetItem("Ask me each time")
@@ -1704,13 +1706,31 @@ class SettingsDialog(QDialog):
             save_settings(self._settings)
         super().accept()
 
-    def closeEvent(self, event) -> None:
-        """Disconnect dangling slot and shut down executor on close."""
+    def _teardown(self) -> None:
+        """Idempotently disconnect the shared-dispatcher slot and stop the executor.
+
+        CR-02: the slot lives on the long-lived `_Dispatcher`, so it MUST be
+        disconnected on every exit path — not just window close. accept()/reject()
+        route through done(), which closeEvent does NOT fire; leaving the slot
+        connected to a soon-to-be-GC'd dialog crashes the next fetch.
+        """
+        if self._torn_down:
+            return
+        self._torn_down = True
         try:
             self._dispatcher.settings_playlists_ready.disconnect(self._on_playlists_ready)
         except (RuntimeError, TypeError):
             pass
         self._dedicated_executor.shutdown(wait=False, cancel_futures=True)
+
+    def done(self, result: int) -> None:
+        """accept()/reject() both funnel through done() — tear down here."""
+        self._teardown()
+        super().done(result)
+
+    def closeEvent(self, event) -> None:
+        """Window-close path (no accept/reject) — tear down here too."""
+        self._teardown()
         super().closeEvent(event)
 
 
@@ -2059,14 +2079,22 @@ class TuneBridgeApp(QMainWindow):
 
     def _open_settings_dialog(self) -> None:
         """Open SettingsDialog (from _btn_settings or _lbl_playlist_pref click)."""
-        dlg = SettingsDialog(
-            dispatcher=self._dispatcher,
-            settings=self._settings,
-            parent=self,
-        )
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._settings = load_settings()
-            self._refresh_playlist_pref_label()
+        # CR-02: a queued second click during the modal exec() nested loop must
+        # not spawn a second dialog (each connects its own shared-dispatcher slot).
+        if getattr(self, "_settings_dialog_active", False):
+            return
+        self._settings_dialog_active = True
+        try:
+            dlg = SettingsDialog(
+                dispatcher=self._dispatcher,
+                settings=self._settings,
+                parent=self,
+            )
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self._settings = load_settings()
+                self._refresh_playlist_pref_label()
+        finally:
+            self._settings_dialog_active = False
 
     def _refresh_playlist_pref_label(self) -> None:
         """Update the near-Start preference indicator label from current settings."""
@@ -2078,10 +2106,12 @@ class TuneBridgeApp(QMainWindow):
             text = ('<span style="color:#B3B3B3;">Playlist: </span>'
                     '<span style="color:#1DB954;">Library only</span>')
         else:
-            safe = _html.escape(name)
-            display = safe[:22] + "…" if len(safe) > 22 else safe
+            # WR-01: truncate the raw name first, then escape — escaping before
+            # truncating measures entity-expanded length and can cut mid-entity.
+            display = name[:22] + "…" if len(name) > 22 else name
+            safe = _html.escape(display)
             text = ('<span style="color:#B3B3B3;">Playlist: </span>'
-                    f'<span style="color:#1DB954;">{display}</span>')
+                    f'<span style="color:#1DB954;">{safe}</span>')
         self._lbl_playlist_pref.setText(text)
 
     def _process_local_files(self, paths: list[str]) -> None:
