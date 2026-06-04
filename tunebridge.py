@@ -156,6 +156,17 @@ QPushButton#start_btn:disabled {
     border: 1px solid rgba(255,255,255,20);
     color: #444444;
 }
+QPushButton#settings_btn {
+    background-color: transparent;
+    border: none;
+    color: #B3B3B3;
+    font-size: 16pt;
+    padding: 0px 4px;
+    min-width: 24px;
+    max-width: 32px;
+}
+QPushButton#settings_btn:hover   { color: #FFFFFF; }
+QPushButton#settings_btn:pressed { color: #B3B3B3; }
 """
 
 # ---------------------------------------------------------------------------
@@ -1802,10 +1813,20 @@ class TuneBridgeApp(QMainWindow):
         layout.setContentsMargins(20, 16, 20, 8)
         layout.setSpacing(8)
 
-        # Title
+        # Title row with top-right settings gear (D-08)
         title = QLabel("TuneBridge")
         title.setObjectName("title_label")
-        layout.addWidget(title)
+
+        self._btn_settings = QPushButton("⚙")          # U+2699 gear glyph
+        self._btn_settings.setObjectName("settings_btn")
+        self._btn_settings.setToolTip("Playlist settings")
+        self._btn_settings.clicked.connect(self._open_settings_dialog)
+
+        header_row = QHBoxLayout()
+        header_row.addWidget(title)
+        header_row.addStretch()
+        header_row.addWidget(self._btn_settings)
+        layout.addLayout(header_row)
 
         # Paste area
         self._paste_box = PasteTextEdit(self)
@@ -1888,6 +1909,15 @@ class TuneBridgeApp(QMainWindow):
         toolbar_row.addWidget(self._chk_save)
 
         toolbar_row.addStretch()
+
+        # Near-Start playlist preference indicator (D-10/D-11)
+        self._lbl_playlist_pref = QLabel()
+        self._lbl_playlist_pref.setObjectName("playlist_pref_label")
+        self._lbl_playlist_pref.setMaximumWidth(180)
+        self._lbl_playlist_pref.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._lbl_playlist_pref.mousePressEvent = lambda _e: self._open_settings_dialog()
+        toolbar_row.addWidget(self._lbl_playlist_pref)
+        self._refresh_playlist_pref_label()
 
         self._btn_start = QPushButton("Start Processing")
         self._btn_start.setObjectName("start_btn")
@@ -2026,6 +2056,33 @@ class TuneBridgeApp(QMainWindow):
         """Persist the local-save toggle to settings (Phase 9 layer). SAVE-01."""
         self._settings["local_save"] = bool(self._chk_save.isChecked())
         save_settings(self._settings)
+
+    def _open_settings_dialog(self) -> None:
+        """Open SettingsDialog (from _btn_settings or _lbl_playlist_pref click)."""
+        dlg = SettingsDialog(
+            dispatcher=self._dispatcher,
+            settings=self._settings,
+            parent=self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._settings = load_settings()
+            self._refresh_playlist_pref_label()
+
+    def _refresh_playlist_pref_label(self) -> None:
+        """Update the near-Start preference indicator label from current settings."""
+        pref = self._settings.get("playlist_preference", "ask")
+        name = self._settings.get("playlist_preference_name", "")
+        if pref == "ask":
+            text = '<span style="color:#B3B3B3;">Playlist: Ask each time</span>'
+        elif pref == "library":
+            text = ('<span style="color:#B3B3B3;">Playlist: </span>'
+                    '<span style="color:#1DB954;">Library only</span>')
+        else:
+            safe = _html.escape(name)
+            display = safe[:22] + "…" if len(safe) > 22 else safe
+            text = ('<span style="color:#B3B3B3;">Playlist: </span>'
+                    f'<span style="color:#1DB954;">{display}</span>')
+        self._lbl_playlist_pref.setText(text)
 
     def _process_local_files(self, paths: list[str]) -> None:
         """Inject local audio files as 'Local File' rows (mirrors _process_urls, D-09)."""
@@ -2384,12 +2441,39 @@ class TuneBridgeApp(QMainWindow):
             self._unlock_ui()
             return
 
-        # Ask user which playlist to upload to (main thread — safe to show dialog here)
+        # PLST-04/05: preference-aware playlist routing (replaces unconditional dialog)
+        settings  = load_settings()
+        pref_mode = settings.get("playlist_preference", "ask")
+        pref_name = settings.get("playlist_preference_name", "")
         playlist_id = None
-        if playlists:
-            dlg = PlaylistSelectDialog(playlists, parent=self)
-            if dlg.exec() == QDialog.DialogCode.Accepted:
-                playlist_id = dlg.selected_id()
+
+        if pref_mode == "library":
+            # PLST-02: library-only — skip dialog, upload to library root
+            playlist_id = None
+
+        elif pref_mode == "playlist":
+            # Pitfall 6 / PLST-05: validate saved name against the live list
+            saved_id = _find_playlist_id_by_name(playlists, pref_name)
+            if saved_id is not None:
+                playlist_id = saved_id          # PLST-04: skip dialog, use favorite
+            else:
+                # D-12: stale — fall back with a visible banner (D-13: pref untouched)
+                stale_msg = (
+                    'Your saved playlist "' + _html.escape(pref_name) + '" no longer exists'
+                    " — pick another or choose library only."
+                )
+                if playlists:                   # Pitfall 10: never open an empty dialog
+                    dlg = PlaylistSelectDialog(playlists, parent=self,
+                                               stale_notice=stale_msg)
+                    if dlg.exec() == QDialog.DialogCode.Accepted:
+                        playlist_id = dlg.selected_id()
+                # else: no playlists at all -> library root (playlist_id stays None)
+
+        else:  # "ask" or unrecognized -> existing v1.0 behavior
+            if playlists:
+                dlg = PlaylistSelectDialog(playlists, parent=self)
+                if dlg.exec() == QDialog.DialogCode.Accepted:
+                    playlist_id = dlg.selected_id()
 
         # Store playlist state for workers and _on_upload_row_finished
         self._upload_playlist_id      = playlist_id
