@@ -150,3 +150,17 @@ def test_chk_save_persists(tmp_path, monkeypatch, qapp):
     finally:
         w2.close()
         w2.deleteLater()
+
+
+def test_playlist_preference_roundtrip(tmp_path, monkeypatch):
+    """PLST-01/02: playlist_preference + playlist_preference_name persist via save/load."""
+    monkeypatch.setattr(tunebridge, "SETTINGS_PATH", tmp_path / "settings.json")
+    payload = {
+        "local_save": False,
+        "playlist_preference": "playlist",
+        "playlist_preference_name": "Charlie",
+    }
+    tunebridge.save_settings(payload)
+    result = tunebridge.load_settings()
+    assert result["playlist_preference"] == "playlist"
+    assert result["playlist_preference_name"] == "Charlie"
