@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSizePolicy,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -919,6 +920,7 @@ class _Dispatcher(QObject):
     upload_batch_done  = Signal()              # Phase 6: emitted when all upload workers resolve
     status_message     = Signal(str)           # thread-safe status bar update
     start_playlist_poll = Signal()             # triggers QTimer on main thread from worker
+    settings_playlists_ready = Signal(dict)   # {} on error/failure
 
     def __init__(self, table: "BatchTable"):
         super().__init__()
@@ -1463,6 +1465,25 @@ class PasteTextEdit(QTextEdit):
 # ---------------------------------------------------------------------------
 
 
+def _find_playlist_id_by_name(playlists: dict, name: str) -> str | None:
+    """Return the first playlist ID whose name matches `name`, or None.
+
+    Matches by human-readable name (not ID): iBroadcast may reuse IDs, so
+    name-match is the correct stale-detection semantics. Name collisions match
+    the first found (documented known limitation).
+    """
+    for pid, pdata in playlists.items():
+        if isinstance(pdata, dict):
+            pname = pdata.get("name", "")
+        elif isinstance(pdata, list) and pdata:
+            pname = pdata[0]
+        else:
+            pname = ""
+        if str(pname) == name:
+            return str(pid)
+    return None
+
+
 class PlaylistSelectDialog(QDialog):
     """Modal dialog: pick an iBroadcast playlist for the current upload batch.
 
@@ -1472,13 +1493,18 @@ class PlaylistSelectDialog(QDialog):
 
     _NO_PLAYLIST = "__none__"
 
-    def __init__(self, playlists: dict, parent=None):
+    def __init__(self, playlists: dict, parent=None, stale_notice: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Add to playlist")
         self.setModal(True)
         self.setMinimumWidth(320)
 
         layout = QVBoxLayout(self)
+        if stale_notice:
+            banner = QLabel(stale_notice)
+            banner.setWordWrap(True)
+            banner.setStyleSheet("color: #EF4444; font-size: 9pt; padding: 4px 0px;")
+            layout.addWidget(banner)
         layout.addWidget(QLabel("Choose an iBroadcast playlist for these tracks:"))
 
         self._list = QListWidget()
@@ -1513,6 +1539,168 @@ class PlaylistSelectDialog(QDialog):
             return None
         val = item.data(Qt.ItemDataRole.UserRole)
         return None if val == self._NO_PLAYLIST else val
+
+
+class SettingsDialog(QDialog):
+    """Modal dialog: manage playlist preference setting.
+
+    Opens instantly on a loading page, fetches playlists off-thread via a
+    dedicated executor, and populates a list with two fixed items + sorted
+    playlists on settings_playlists_ready.
+    """
+
+    _PAGE_LOADING = 0
+    _PAGE_LOADED  = 1
+    _PAGE_ERROR   = 2
+
+    def __init__(self, dispatcher, settings, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.setModal(True)
+        self.setMinimumWidth(360)
+
+        self._dispatcher = dispatcher
+        self._settings = settings          # live dict reference from caller
+        self._fetch_failed = False
+        self._dedicated_executor = ThreadPoolExecutor(max_workers=1)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Playlist preference:"))
+
+        # --- QStackedWidget with three pages ---
+        self._stack = QStackedWidget()
+
+        # PAGE_LOADING (idx 0)
+        loading_page = QWidget()
+        loading_layout = QVBoxLayout(loading_page)
+        lbl_loading = QLabel("Loading playlists…")
+        lbl_loading.setStyleSheet("color: #B3B3B3; font-size: 9pt;")
+        lbl_loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_layout.addWidget(lbl_loading)
+        self._stack.addWidget(loading_page)  # index 0
+
+        # PAGE_LOADED (idx 1)
+        loaded_page = QWidget()
+        loaded_layout = QVBoxLayout(loaded_page)
+        self._list = QListWidget()
+        loaded_layout.addWidget(self._list)
+        self._lbl_empty_note = QLabel("No playlists on your account yet.")
+        self._lbl_empty_note.setStyleSheet("color: #B3B3B3; font-size: 9pt;")
+        self._lbl_empty_note.setVisible(False)
+        loaded_layout.addWidget(self._lbl_empty_note)
+        self._stack.addWidget(loaded_page)   # index 1
+
+        # PAGE_ERROR (idx 2)
+        error_page = QWidget()
+        error_layout = QVBoxLayout(error_page)
+        _err_msg = "Couldn" + "\x27" + "t load playlists - check your connection or iBroadcast login."
+        self._lbl_error = QLabel(_err_msg)
+        self._lbl_error.setStyleSheet("color: #B3B3B3; font-size: 9pt;")
+        self._lbl_error.setWordWrap(True)
+        error_layout.addWidget(self._lbl_error)
+        self._btn_retry = QPushButton("Retry")
+        self._btn_retry.clicked.connect(self._start_fetch)
+        error_layout.addWidget(self._btn_retry)
+        self._stack.addWidget(error_page)    # index 2
+
+        layout.addWidget(self._stack)
+
+        # --- Button box ---
+        btn_box = QDialogButtonBox()
+        self._btn_save = btn_box.addButton("Save Preference", QDialogButtonBox.ButtonRole.AcceptRole)
+        btn_box.addButton("Discard", QDialogButtonBox.ButtonRole.RejectRole)
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+        dispatcher.settings_playlists_ready.connect(self._on_playlists_ready)
+        self._start_fetch()
+
+    def _start_fetch(self) -> None:
+        self._fetch_failed = False
+        self._stack.setCurrentIndex(self._PAGE_LOADING)
+        self._btn_save.setEnabled(False)
+        username = os.environ.get("IBROADCAST_USERNAME", "").strip()
+        password = os.environ.get("IBROADCAST_PASSWORD", "").strip()
+        self._dedicated_executor.submit(self._fetch_worker, username, password)
+
+    def _fetch_worker(self, username: str, password: str) -> None:
+        """Worker thread — never touches widgets directly."""
+        try:
+            _, _, _, playlists = _ibroadcast_login(username, password)
+            self._dispatcher.settings_playlists_ready.emit(playlists or {})
+        except Exception:
+            self._fetch_failed = True
+            self._dispatcher.settings_playlists_ready.emit({})
+
+    def _on_playlists_ready(self, playlists: dict) -> None:
+        """Main-thread slot: populate list or show error page."""
+        if self._fetch_failed:
+            self._stack.setCurrentIndex(self._PAGE_ERROR)
+            return
+        self._list.clear()
+        ask_item = QListWidgetItem("Ask me each time")
+        ask_item.setData(Qt.ItemDataRole.UserRole, "ask")
+        self._list.addItem(ask_item)
+        lib_item = QListWidgetItem("Library only (no playlist)")
+        lib_item.setData(Qt.ItemDataRole.UserRole, "library")
+        self._list.addItem(lib_item)
+
+        def _name(kv):
+            _pid, pdata = kv
+            if isinstance(pdata, dict):
+                return str(pdata.get("name", f"Playlist {_pid}"))
+            if isinstance(pdata, list) and pdata:
+                return str(pdata[0])
+            return f"Playlist {_pid}"
+
+        for pid, pdata in sorted(playlists.items(), key=lambda kv: _name(kv).lower()):
+            item = QListWidgetItem(_name((pid, pdata)))
+            item.setData(Qt.ItemDataRole.UserRole, str(pid))
+            self._list.addItem(item)
+
+        self._lbl_empty_note.setVisible(len(playlists) == 0)
+        self._restore_selection()
+        self._stack.setCurrentIndex(self._PAGE_LOADED)
+        self._btn_save.setEnabled(True)
+
+    def _restore_selection(self) -> None:
+        """Preselect the saved preference."""
+        pref = self._settings.get("playlist_preference", "ask")
+        name = self._settings.get("playlist_preference_name", "")
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            val = item.data(Qt.ItemDataRole.UserRole)
+            if pref in ("ask", "library") and val == pref:
+                self._list.setCurrentRow(i)
+                return
+            if pref == "playlist" and item.text() == name:
+                self._list.setCurrentRow(i)
+                return
+        self._list.setCurrentRow(0)
+
+    def accept(self) -> None:
+        """Write settings on OK only — main thread, never from worker."""
+        item = self._list.currentItem()
+        if item is not None:
+            val = item.data(Qt.ItemDataRole.UserRole)
+            if val in ("ask", "library"):
+                self._settings["playlist_preference"] = val
+                self._settings["playlist_preference_name"] = ""
+            else:
+                self._settings["playlist_preference"] = "playlist"
+                self._settings["playlist_preference_name"] = item.text()
+            save_settings(self._settings)
+        super().accept()
+
+    def closeEvent(self, event) -> None:
+        """Disconnect dangling slot and shut down executor on close."""
+        try:
+            self._dispatcher.settings_playlists_ready.disconnect(self._on_playlists_ready)
+        except (RuntimeError, TypeError):
+            pass
+        self._dedicated_executor.shutdown(wait=False, cancel_futures=True)
+        super().closeEvent(event)
 
 
 class FolderConfirmDialog(QDialog):
