@@ -2995,7 +2995,13 @@ class TuneBridgeApp(QMainWindow):
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    # In a PyInstaller one-file build the script runs from a temp extraction
+    # dir (sys._MEIPASS), so a bare load_dotenv() can't find a .env placed next
+    # to TuneBridge.exe. When frozen, load .env from the executable's folder.
+    if getattr(sys, "frozen", False):
+        load_dotenv(Path(sys.executable).parent / ".env")
+    else:
+        load_dotenv()
     # CR-01: warn loudly if the user has opted out of TLS verification.
     if not _ibroadcast_tls_verify():
         import warnings as _warnings
