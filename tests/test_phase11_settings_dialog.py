@@ -339,7 +339,7 @@ def test_playlist_select_dialog_sorts_az_positional(qapp):
 # (the dialog already has an explicit "No playlist" row, so Cancel == abort).
 # ---------------------------------------------------------------------------
 
-def test_cancel_aborts_upload_batch(window, qapp, monkeypatch):
+def test_cancel_aborts_upload_batch(window, monkeypatch):
     """PLST-06: Cancel on PlaylistSelectDialog aborts the whole batch — nothing uploads."""
     tunebridge.save_settings({"local_save": False, "playlist_preference": "ask",
                               "playlist_preference_name": ""})
@@ -355,18 +355,24 @@ def test_cancel_aborts_upload_batch(window, qapp, monkeypatch):
     with patch("tunebridge._ibroadcast_login", return_value=("tok", 1, {}, live)):
         with patch("tunebridge.PlaylistSelectDialog", return_value=dlg):
             window._start_upload_batch()
-    qapp.processEvents()   # drain the deferred cancel-message timer while window is alive
     window._executor.submit.assert_not_called()   # no upload workers
     unlock.assert_called_once()                    # UI unlocked / batch ended
+    assert window._batch_cancelled is True         # flag set for download-done guard
 
 
-def test_cancel_message_survives_download_done(window, qapp):
-    """PLST-06: in save-OFF mode the abort runs synchronously inside the
-    download handler, which then emits 'Done — N downloaded' and would clobber
-    the cancel feedback. The abort message must be deferred so it wins."""
-    window._abort_upload_batch([1, 2])
-    # Reproduce the synchronous 'Done — downloaded' message that follows the
-    # abort in the save-OFF call chain (tunebridge.py:2818).
-    window.statusBar().showMessage("Done — 2 downloaded, 0 failed")
-    qapp.processEvents()   # let the deferred cancel message land
-    assert "cancelled" in window.statusBar().currentMessage().lower()
+def test_cancel_message_survives_download_done(window, monkeypatch):
+    """PLST-06: in save-OFF mode the abort runs synchronously inside the download
+    handler, which then reaches the 'Done — N downloaded' branch. When the batch
+    was cancelled, that branch must NOT overwrite the 'Upload cancelled' message."""
+    monkeypatch.setattr(window, "_unlock_ui", MagicMock())
+    window._batch_cancelled = True
+    window._download_total  = 1
+    window._download_done   = 0
+    window._download_failed = 0
+    window._folder_total    = 0
+    window.statusBar().showMessage("Upload cancelled — 2 track(s) not uploaded.")
+    # Drive the final-row completion that would normally emit "Done — N downloaded".
+    window._on_download_row_finished(0, tunebridge.SongStatus.FAILED_DOWNLOAD.value)
+    msg = window.statusBar().currentMessage().lower()
+    assert "cancelled" in msg          # cancel feedback preserved
+    assert "downloaded" not in msg     # download tally suppressed

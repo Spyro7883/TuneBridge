@@ -2001,6 +2001,10 @@ class TuneBridgeApp(QMainWindow):
         self._upload_done     = 0
         self._upload_existed  = 0
         self._upload_failed   = 0
+        # PLST-06: set when the user cancels playlist selection — suppresses the
+        # download-phase "Done — N downloaded" message that would otherwise clobber
+        # the "Upload cancelled" status in save-OFF mode (synchronous call chain).
+        self._batch_cancelled = False
         # Phase 6: playlist state (set in _start_upload_batch, used in _on_upload_row_finished)
         self._upload_playlist_id:   str | None  = None
         self._upload_playlist_name: str        = ""
@@ -2464,13 +2468,13 @@ class TuneBridgeApp(QMainWindow):
         for row_id in rows:
             self._dispatcher.row_status_changed.emit(row_id, SongStatus.CANCELLED.value)
         # In save-OFF mode this runs synchronously inside _on_download_row_finished,
-        # which then emits "Done — N downloaded" and would clobber this message.
-        # Defer to the event loop so the cancel feedback is shown last.
-        # Context-object overload: if this window is destroyed before the timer
-        # fires (e.g. in tests, or app shutdown), the slot is silently dropped
-        # instead of touching a deleted C++ object — avoids a PySide6 segfault.
-        msg = f"Upload cancelled — {len(rows)} track(s) not uploaded."
-        QTimer.singleShot(0, self, lambda: self._dispatcher.status_message.emit(msg))
+        # which would then emit "Done — N downloaded" and clobber this message.
+        # Setting the flag makes that handler suppress its message (no event-loop
+        # deferral needed — deterministic and CI-safe).
+        self._batch_cancelled = True
+        self._dispatcher.status_message.emit(
+            f"Upload cancelled — {len(rows)} track(s) not uploaded."
+        )
         self._unlock_ui()
 
     def _start_upload_batch(self) -> None:
@@ -2820,9 +2824,12 @@ class TuneBridgeApp(QMainWindow):
             return
 
         # All workers have finished — update status bar and unlock UI (D-16, D-03)
-        self.statusBar().showMessage(
-            f"Done — {self._download_done} downloaded, {self._download_failed} failed"
-        )
+        # PLST-06: if the batch was cancelled at playlist selection, keep the
+        # "Upload cancelled" message — don't overwrite it with the download tally.
+        if not self._batch_cancelled:
+            self.statusBar().showMessage(
+                f"Done — {self._download_done} downloaded, {self._download_failed} failed"
+            )
         # Disconnect this slot — it is only valid for this batch run
         try:
             self._dispatcher.row_status_changed.disconnect(self._on_download_row_finished)
@@ -2915,6 +2922,7 @@ class TuneBridgeApp(QMainWindow):
             self._folder_skipped   = 0
             self._folder_failed    = 0
             self._folder_batch_emitted = False   # Pitfall 4: fresh guard per batch
+            self._batch_cancelled      = False   # PLST-06: fresh per batch
 
             # Connect batch-completion tracker (disconnect guard handled in _on_download_row_finished)
             self._dispatcher.row_status_changed.connect(self._on_download_row_finished)
