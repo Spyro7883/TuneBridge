@@ -18,7 +18,9 @@ A desktop app that takes Spotify or YouTube track URLs — or local audio files 
 - **Batch downloads** — parallel downloads with dynamic thread count based on queue size
 - **440 Hz / 432 Hz** — optional pitch retune per batch before saving
 - **Folder confirmation** — per-song folder dialog with last-used folder suggestion; app never creates or renames folders
-- **iBroadcast upload** — uploads processed files to a configurable playlist with duplicate detection
+- **Save to local disk toggle** — keep a local copy or upload straight to iBroadcast only; when off, the folder step is skipped and a fully tagged file is uploaded
+- **Favorite playlist & preferences** — a Settings dialog (gear button) fetches your iBroadcast playlists live; pick a favorite playlist, *library only*, or *ask each time*. The choice persists across sessions and is shown next to **Start**
+- **iBroadcast upload** — uploads processed files with duplicate detection; routes to your playlist preference, falling back gracefully if a saved playlist no longer exists
 
 ## Requirements
 
@@ -54,9 +56,10 @@ python tunebridge.py
 
 1. Paste one or more Spotify or YouTube URLs into the input box (one per line), and/or click **Add Files** to pick local audio files
 2. Select **440 Hz** or **432 Hz** for the batch
-3. Click **Start Processing**
-4. Confirm the destination folder for each song as it completes
-5. Click **Upload to iBroadcast** when ready
+3. *(Optional)* Toggle **Save to local disk**, and use the **⚙ Settings** gear to set a favorite playlist or upload preference
+4. Click **Start Processing**
+5. Confirm the destination folder for each song as it completes (skipped when *Save to local disk* is off)
+6. Files upload to iBroadcast automatically — if your preference is *ask each time*, pick the target playlist when prompted (Cancel aborts the upload)
 
 ## Configuration
 
