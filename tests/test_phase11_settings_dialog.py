@@ -298,3 +298,37 @@ def test_ib_collection_to_dict_handles_non_dict():
     from tunebridge import _ib_collection_to_dict
     assert _ib_collection_to_dict([], ["name"]) == {}
     assert _ib_collection_to_dict(None, []) == {}
+
+
+# ---------------------------------------------------------------------------
+# UAT-02: PlaylistSelectDialog must list playlists A-Z (case-insensitive),
+# matching SettingsDialog ordering (reported during Phase 11 human UAT).
+# ---------------------------------------------------------------------------
+
+def test_playlist_select_dialog_sorts_az(qapp):
+    """PlaylistSelectDialog rows (after the 'No playlist' sentinel) are A-Z,
+    case-insensitive — regardless of dict insertion order."""
+    from tunebridge import PlaylistSelectDialog
+    playlists = {
+        "3": {"name": "Charlie"},
+        "1": {"name": "alpha"},
+        "2": {"name": "Bravo"},
+    }
+    dlg = PlaylistSelectDialog(playlists, parent=None)
+    names = [dlg._list.item(i).text() for i in range(1, dlg._list.count())]
+    assert names == ["alpha", "Bravo", "Charlie"]
+    dlg.deleteLater()
+
+
+def test_playlist_select_dialog_sorts_az_positional(qapp):
+    """Sorting also works for positional-array playlist values (name at index 0)."""
+    from tunebridge import PlaylistSelectDialog
+    playlists = {
+        "9": ["Zulu", [1, 2]],
+        "8": ["Mike", [3]],
+        "7": ["Alfa", []],
+    }
+    dlg = PlaylistSelectDialog(playlists, parent=None)
+    names = [dlg._list.item(i).text() for i in range(1, dlg._list.count())]
+    assert names == ["Alfa", "Mike", "Zulu"]
+    dlg.deleteLater()

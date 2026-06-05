@@ -1487,6 +1487,21 @@ class PasteTextEdit(QTextEdit):
 # ---------------------------------------------------------------------------
 
 
+def _playlist_display_name(pid, pdata) -> str:
+    """Human-readable name for an iBroadcast playlist entry.
+
+    Handles both shapes: a named-field dict ({"name": ...}) and a positional
+    array (name at index 0). Falls back to "Playlist {pid}" when neither yields
+    a usable name. Shared by SettingsDialog and PlaylistSelectDialog so both
+    render and sort names identically.
+    """
+    if isinstance(pdata, dict):
+        return str(pdata.get("name", f"Playlist {pid}"))
+    if isinstance(pdata, list) and pdata:
+        return str(pdata[0])
+    return f"Playlist {pid}"
+
+
 def _find_playlist_id_by_name(playlists: dict, name: str) -> str | None:
     """Return the first playlist ID whose name matches `name`, or None.
 
@@ -1534,14 +1549,10 @@ class PlaylistSelectDialog(QDialog):
         none_item.setData(Qt.ItemDataRole.UserRole, self._NO_PLAYLIST)
         self._list.addItem(none_item)
 
-        for pid, pdata in playlists.items():
-            if isinstance(pdata, dict):
-                raw_name = pdata.get("name", f"Playlist {pid}")
-            elif isinstance(pdata, list) and pdata:
-                raw_name = pdata[0]
-            else:
-                raw_name = f"Playlist {pid}"
-            item = QListWidgetItem(str(raw_name))
+        for pid, pdata in sorted(
+            playlists.items(), key=lambda kv: _playlist_display_name(*kv).lower()
+        ):
+            item = QListWidgetItem(_playlist_display_name(pid, pdata))
             item.setData(Qt.ItemDataRole.UserRole, str(pid))
             self._list.addItem(item)
 
@@ -1670,16 +1681,10 @@ class SettingsDialog(QDialog):
         lib_item.setData(Qt.ItemDataRole.UserRole, "library")
         self._list.addItem(lib_item)
 
-        def _name(kv):
-            _pid, pdata = kv
-            if isinstance(pdata, dict):
-                return str(pdata.get("name", f"Playlist {_pid}"))
-            if isinstance(pdata, list) and pdata:
-                return str(pdata[0])
-            return f"Playlist {_pid}"
-
-        for pid, pdata in sorted(playlists.items(), key=lambda kv: _name(kv).lower()):
-            item = QListWidgetItem(_name((pid, pdata)))
+        for pid, pdata in sorted(
+            playlists.items(), key=lambda kv: _playlist_display_name(*kv).lower()
+        ):
+            item = QListWidgetItem(_playlist_display_name(pid, pdata))
             item.setData(Qt.ItemDataRole.UserRole, str(pid))
             self._list.addItem(item)
 
