@@ -332,3 +332,28 @@ def test_playlist_select_dialog_sorts_az_positional(qapp):
     names = [dlg._list.item(i).text() for i in range(1, dlg._list.count())]
     assert names == ["Alfa", "Mike", "Zulu"]
     dlg.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# PLST-06: Cancel on PlaylistSelectDialog must ABORT the entire upload batch
+# (the dialog already has an explicit "No playlist" row, so Cancel == abort).
+# ---------------------------------------------------------------------------
+
+def test_cancel_aborts_upload_batch(window, monkeypatch):
+    """PLST-06: Cancel on PlaylistSelectDialog aborts the whole batch — nothing uploads."""
+    tunebridge.save_settings({"local_save": False, "playlist_preference": "ask",
+                              "playlist_preference_name": ""})
+    monkeypatch.setenv("IBROADCAST_USERNAME", "u")
+    monkeypatch.setenv("IBROADCAST_PASSWORD", "p")
+    live = {"p1": {"name": "Alpha"}}
+    window._upload_paths = {1: "C:/tmp/a.mp3"}
+    window._executor = MagicMock()
+    unlock = MagicMock()
+    monkeypatch.setattr(window, "_unlock_ui", unlock)
+    dlg = MagicMock()
+    dlg.exec.return_value = QDialog.DialogCode.Rejected
+    with patch("tunebridge._ibroadcast_login", return_value=("tok", 1, {}, live)):
+        with patch("tunebridge.PlaylistSelectDialog", return_value=dlg):
+            window._start_upload_batch()
+    window._executor.submit.assert_not_called()   # no upload workers
+    unlock.assert_called_once()                    # UI unlocked / batch ended

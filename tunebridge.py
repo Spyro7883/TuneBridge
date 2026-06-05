@@ -717,6 +717,7 @@ class SongStatus(Enum):
     FAILED_SAVE     = "Failed — save"       # D-10: OSError during shutil.move
     ALREADY_UPLOADED = "Already uploaded"   # D-07: duplicate on iBroadcast
     FAILED_UPLOAD    = "Failed — upload"    # D-14: upload HTTP/network failure
+    CANCELLED        = "Cancelled — upload" # PLST-06: user cancelled at playlist-select step
 
 
 # ---------------------------------------------------------------------------
@@ -1268,6 +1269,7 @@ class BatchTable(QWidget):
         "Failed — save":     QColor("#EF4444"),   # D-10: matches other failure states
         "Already uploaded":  QColor("#14B8A6"),   # D-07: muted teal, distinct from Done green
         "Failed — upload":   QColor("#EF4444"),   # D-14: same red as other failures
+        "Cancelled — upload": QColor("#B3B3B3"),  # PLST-06: gray neutral, mirrors Skipped
     }
 
     _TYPE_COLORS: dict[str, QColor] = {
@@ -2453,6 +2455,19 @@ class TuneBridgeApp(QMainWindow):
                 f"failed {self._folder_failed}"
             )
 
+    def _abort_upload_batch(self, rows) -> None:
+        """User cancelled playlist selection — abort upload, mark rows cancelled. (PLST-06)
+
+        Mirrors the empty-batch guard: no workers submitted, UI unlocked.
+        "Cancelled — upload" is a neutral terminal (not in FAILURE_STATUSES).
+        """
+        for row_id in rows:
+            self._dispatcher.row_status_changed.emit(row_id, SongStatus.CANCELLED.value)
+        self._dispatcher.status_message.emit(
+            f"Upload cancelled — {len(rows)} track(s) not uploaded."
+        )
+        self._unlock_ui()
+
     def _start_upload_batch(self) -> None:
         """Slot connected to folder_batch_done. Authenticates once, submits upload workers. (D-04/D-09/D-13)
 
@@ -2513,6 +2528,9 @@ class TuneBridgeApp(QMainWindow):
                                                stale_notice=stale_msg)
                     if dlg.exec() == QDialog.DialogCode.Accepted:
                         playlist_id = dlg.selected_id()
+                    else:                       # PLST-06: Cancel aborts the whole batch
+                        self._abort_upload_batch(uploading_rows)
+                        return
                 # else: no playlists at all -> library root (playlist_id stays None)
 
         else:  # "ask" or unrecognized -> existing v1.0 behavior
@@ -2520,6 +2538,9 @@ class TuneBridgeApp(QMainWindow):
                 dlg = PlaylistSelectDialog(playlists, parent=self)
                 if dlg.exec() == QDialog.DialogCode.Accepted:
                     playlist_id = dlg.selected_id()
+                else:                           # PLST-06: Cancel aborts the whole batch
+                    self._abort_upload_batch(uploading_rows)
+                    return
 
         # Store playlist state for workers and _on_upload_row_finished
         self._upload_playlist_id      = playlist_id
