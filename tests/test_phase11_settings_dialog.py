@@ -357,3 +357,15 @@ def test_cancel_aborts_upload_batch(window, monkeypatch):
             window._start_upload_batch()
     window._executor.submit.assert_not_called()   # no upload workers
     unlock.assert_called_once()                    # UI unlocked / batch ended
+
+
+def test_cancel_message_survives_download_done(window, qapp):
+    """PLST-06: in save-OFF mode the abort runs synchronously inside the
+    download handler, which then emits 'Done — N downloaded' and would clobber
+    the cancel feedback. The abort message must be deferred so it wins."""
+    window._abort_upload_batch([1, 2])
+    # Reproduce the synchronous 'Done — downloaded' message that follows the
+    # abort in the save-OFF call chain (tunebridge.py:2818).
+    window.statusBar().showMessage("Done — 2 downloaded, 0 failed")
+    qapp.processEvents()   # let the deferred cancel message land
+    assert "cancelled" in window.statusBar().currentMessage().lower()

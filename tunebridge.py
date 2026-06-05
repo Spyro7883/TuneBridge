@@ -2463,9 +2463,11 @@ class TuneBridgeApp(QMainWindow):
         """
         for row_id in rows:
             self._dispatcher.row_status_changed.emit(row_id, SongStatus.CANCELLED.value)
-        self._dispatcher.status_message.emit(
-            f"Upload cancelled — {len(rows)} track(s) not uploaded."
-        )
+        # In save-OFF mode this runs synchronously inside _on_download_row_finished,
+        # which then emits "Done — N downloaded" and would clobber this message.
+        # Defer to the event loop so the cancel feedback is shown last.
+        msg = f"Upload cancelled — {len(rows)} track(s) not uploaded."
+        QTimer.singleShot(0, lambda: self._dispatcher.status_message.emit(msg))
         self._unlock_ui()
 
     def _start_upload_batch(self) -> None:
