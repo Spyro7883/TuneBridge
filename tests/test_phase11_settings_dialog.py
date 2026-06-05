@@ -261,3 +261,40 @@ def test_fetch_error_shows_retry(monkeypatch, tmp_path, qapp):
     assert hasattr(d, "_btn_retry")
     assert "Couldn't load playlists" in d._lbl_error.text()
     assert "Traceback" not in d._lbl_error.text()
+
+
+# ---------------------------------------------------------------------------
+# UAT-01 regression: iBroadcast 'map' field-legend must not become a phantom
+# playlist named '0' (reported during Phase 11 human UAT).
+# ---------------------------------------------------------------------------
+
+def test_ib_collection_to_dict_strips_map_legend():
+    """iBroadcast library collections are {'map': {'name':0,...}, '<id>': [...]}.
+    The 'map' legend is NOT a real item; it must be stripped so it never renders
+    as a phantom playlist '0' (str(map['name']) == '0')."""
+    from tunebridge import _ib_collection_to_dict
+    raw = {
+        "map": {"name": 0, "tracks": 1, "type": 2},
+        "9001": ["Alpha Playlist", [1, 2, 3], "normal"],
+    }
+    result = _ib_collection_to_dict(raw, ["name", "tracks", "type"])
+    assert "map" not in result
+    assert list(result.keys()) == ["9001"]
+    assert result["9001"]["name"] == "Alpha Playlist"
+
+
+def test_ib_collection_to_dict_strips_map_when_fields_empty():
+    """When the field schema is empty, the legacy _to_dict returned raw unchanged,
+    leaking 'map'. The 'map' key must still be dropped."""
+    from tunebridge import _ib_collection_to_dict
+    raw = {"map": {"name": 0}, "9001": ["My Playlist"]}
+    result = _ib_collection_to_dict(raw, [])
+    assert "map" not in result
+    assert result["9001"] == ["My Playlist"]
+
+
+def test_ib_collection_to_dict_handles_non_dict():
+    """Defensive: a non-dict collection (e.g. malformed response) yields {}."""
+    from tunebridge import _ib_collection_to_dict
+    assert _ib_collection_to_dict([], ["name"]) == {}
+    assert _ib_collection_to_dict(None, []) == {}

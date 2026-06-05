@@ -752,6 +752,26 @@ def _ibroadcast_tls_verify() -> bool:
     return os.environ.get("TUNEBRIDGE_INSECURE_TLS", "").strip() not in ("1", "true", "yes")
 
 
+def _ib_collection_to_dict(raw: dict, fields: list) -> dict:
+    """Convert an iBroadcast library collection to {id: named-field dict}.
+
+    iBroadcast prefixes each collection (tracks, playlists, …) with a 'map'
+    field-legend entry — e.g. {"name": 0, "tracks": 1, …} — describing the
+    positional-array column order. It is NOT a real item: left in place it
+    renders as a phantom playlist named '0' (str(map["name"]) == "0"). Strip it
+    here, at the source, so every downstream consumer sees real items only.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    items = {iid: item for iid, item in raw.items() if iid != "map"}
+    if not fields:
+        return items
+    return {
+        iid: dict(zip(fields, item)) if isinstance(item, list) else item
+        for iid, item in items.items()
+    }
+
+
 def _ibroadcast_login(
     username: str, password: str
 ) -> tuple[str | None, int | None, dict, dict]:
@@ -795,15 +815,6 @@ def _ibroadcast_login(
         supported = lib_data.get("supported", {})
         lib_sect  = lib_data.get("library", {})
 
-        def _to_dict(raw: dict, fields: list) -> dict:
-            """Convert iBroadcast positional-array items to named-field dicts."""
-            if not fields:
-                return raw
-            return {
-                iid: dict(zip(fields, item)) if isinstance(item, list) else item
-                for iid, item in raw.items()
-            }
-
         if isinstance(supported, dict):
             track_fields    = supported.get("tracks",    {}).get("fields", [])
             playlist_fields = supported.get("playlists", {}).get("fields", [])
@@ -813,8 +824,8 @@ def _ibroadcast_login(
 
         raw_tracks    = lib_sect.get("tracks",    {}) if isinstance(lib_sect, dict) else {}
         raw_playlists = lib_sect.get("playlists", {}) if isinstance(lib_sect, dict) else {}
-        library   = _to_dict(raw_tracks,    track_fields)
-        playlists = _to_dict(raw_playlists, playlist_fields)
+        library   = _ib_collection_to_dict(raw_tracks,    track_fields)
+        playlists = _ib_collection_to_dict(raw_playlists, playlist_fields)
         _log.warning("iBroadcast library: %d tracks, %d playlists", len(library), len(playlists))
 
         return token, user_id, library, playlists
