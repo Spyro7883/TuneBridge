@@ -2466,8 +2466,11 @@ class TuneBridgeApp(QMainWindow):
         # In save-OFF mode this runs synchronously inside _on_download_row_finished,
         # which then emits "Done — N downloaded" and would clobber this message.
         # Defer to the event loop so the cancel feedback is shown last.
+        # Context-object overload: if this window is destroyed before the timer
+        # fires (e.g. in tests, or app shutdown), the slot is silently dropped
+        # instead of touching a deleted C++ object — avoids a PySide6 segfault.
         msg = f"Upload cancelled — {len(rows)} track(s) not uploaded."
-        QTimer.singleShot(0, lambda: self._dispatcher.status_message.emit(msg))
+        QTimer.singleShot(0, self, lambda: self._dispatcher.status_message.emit(msg))
         self._unlock_ui()
 
     def _start_upload_batch(self) -> None:

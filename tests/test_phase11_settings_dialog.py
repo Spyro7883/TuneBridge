@@ -339,7 +339,7 @@ def test_playlist_select_dialog_sorts_az_positional(qapp):
 # (the dialog already has an explicit "No playlist" row, so Cancel == abort).
 # ---------------------------------------------------------------------------
 
-def test_cancel_aborts_upload_batch(window, monkeypatch):
+def test_cancel_aborts_upload_batch(window, qapp, monkeypatch):
     """PLST-06: Cancel on PlaylistSelectDialog aborts the whole batch — nothing uploads."""
     tunebridge.save_settings({"local_save": False, "playlist_preference": "ask",
                               "playlist_preference_name": ""})
@@ -355,6 +355,7 @@ def test_cancel_aborts_upload_batch(window, monkeypatch):
     with patch("tunebridge._ibroadcast_login", return_value=("tok", 1, {}, live)):
         with patch("tunebridge.PlaylistSelectDialog", return_value=dlg):
             window._start_upload_batch()
+    qapp.processEvents()   # drain the deferred cancel-message timer while window is alive
     window._executor.submit.assert_not_called()   # no upload workers
     unlock.assert_called_once()                    # UI unlocked / batch ended
 
